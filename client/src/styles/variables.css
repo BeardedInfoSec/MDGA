@@ -1,0 +1,91 @@
+:root {
+  /* === COLORS === */
+  --color-red-dark: #8C1616;
+  --color-red: #B91C1C;
+  --color-red-light: #DC2626;
+  --color-red-glow: rgba(185, 28, 28, 0.4);
+
+  --color-black: #0A0A0A;
+  --color-black-soft: #111111;
+  --color-gray-900: #1A1A1A;
+  --color-gray-800: #2D2D2D;
+  --color-gray-700: #3D3D3D;
+  --color-gray-400: #9CA3AF;
+  --color-gray-300: #D1D5DB;
+
+  --color-gold-dark: #F5C518;
+  --color-gold: #FFE033;
+  --color-gold-light: #FFED4A;
+
+  --color-parchment: #D4C5A9;
+  --color-parchment-light: #E8DECA;
+  --color-alliance: #1A4CA3;
+  --color-alliance-glow: rgba(26, 76, 163, 0.4);
+
+  --color-discord: #5865F2;
+  --color-raid: #8B5CF6;
+  --color-vote-positive: #22c55e;
+
+  --color-info: #5865F2;
+  --color-info-dark: #4752C4;
+  --color-success: #34D399;
+  --color-warning: #EAB308;
+
+  --color-text-primary: #E5E5E5;
+  --color-text-secondary: #9CA3AF;
+  --color-text-muted: #9CA3AF;
+  --color-text-heading: #FFE033;
+  --color-text-on-red: #FFFFFF;
+
+  /* === TYPOGRAPHY === */
+  --font-display: 'Morpheus', 'LifeCraft', 'Cinzel Decorative', serif;
+  --font-heading: 'Morpheus', 'LifeCraft', 'Cinzel', serif;
+  --font-body: 'Crimson Text', serif;
+  --font-ui: 'Inter', sans-serif;
+
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+  --font-size-5xl: 3rem;
+  --font-size-hero: 4rem;
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.6;
+  --line-height-loose: 1.8;
+
+  /* === SPACING === */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+
+  /* === LAYOUT === */
+  --container-max: 1200px;
+  --container-narrow: 800px;
+  --nav-height: 70px;
+  --border-radius-sm: 4px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+
+  /* === EFFECTS === */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.5);
+  --shadow-glow-red: 0 0 20px rgba(185, 28, 28, 0.3);
+  --shadow-glow-gold: 0 0 15px rgba(255, 215, 0, 0.2);
+  --transition-fast: 150ms ease;
+  --transition-normal: 300ms ease;
+  --transition-slow: 500ms ease;
+}

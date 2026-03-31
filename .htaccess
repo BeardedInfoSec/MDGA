@@ -1,0 +1,4 @@
+RewriteEngine On
+
+# Proxy all requests to Node.js server on port 3001
+RewriteRule ^(.*)$ http://127.0.0.1:3001/$1 [P,L]

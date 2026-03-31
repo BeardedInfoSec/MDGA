@@ -1,0 +1,8 @@
+# Environment variables (contains DB credentials)
+.env
+
+# Node
+node_modules/
+
+# User uploads
+uploads/

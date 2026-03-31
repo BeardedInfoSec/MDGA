@@ -1,0 +1,50 @@
+.loginBox {
+  max-width: 400px;
+  margin: 0 auto;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-card);
+}
+
+.loginBox h2 {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.label {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-gold);
+}
+
+.input {
+  background: var(--color-black);
+  border: 2px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  transition: border-color var(--transition-fast);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-red);
+  box-shadow: 0 0 0 3px var(--color-red-glow);
+}
+
+.error {
+  margin-bottom: var(--space-4);
+}

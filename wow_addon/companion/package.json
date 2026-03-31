@@ -1,0 +1,13 @@
+{
+  "name": "mdga-companion",
+  "version": "1.0.0",
+  "description": "MDGA WoW Addon Companion — watches SavedVariables and syncs to server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "node-fetch": "^2.7.0"
+  }
+}

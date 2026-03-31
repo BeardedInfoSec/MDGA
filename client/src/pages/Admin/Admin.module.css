@@ -1,0 +1,1934 @@
+/* ── Admin Tabs ── */
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-8);
+  border-bottom: 2px solid var(--color-gray-700);
+}
+
+.tab {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: var(--space-3) var(--space-6);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  position: relative;
+  transition: color var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tabActive {
+  composes: tab;
+  color: var(--color-gold);
+}
+
+.tabActive::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-gold);
+}
+
+/* ── Admin Header ── */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-8);
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+
+.header h2 {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* ── Event List ── */
+.eventList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.eventItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-4) var(--space-6);
+  transition: border-color var(--transition-fast);
+}
+
+.eventItem:hover {
+  border-color: var(--color-gray-400);
+}
+
+.eventBar {
+  width: 4px;
+  height: 40px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.eventInfo {
+  flex: 1;
+  font-family: var(--font-ui);
+}
+
+.eventTitle {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.eventMeta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.eventActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.seriesBadge {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-gray-800);
+  padding: 1px var(--space-2);
+  border-radius: var(--border-radius-sm);
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+.durationHint {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
+}
+
+.recurrenceSection {
+  border-top: 1px solid var(--color-gray-700);
+  padding-top: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.recurrenceToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.recurrenceToggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-red);
+}
+
+.recurrenceFields {
+  margin-top: var(--space-3);
+}
+
+.recurrencePreview {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
+  line-height: var(--line-height-normal);
+}
+
+/* ── Application Filter Buttons ── */
+.appFilter {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.appFilter:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-primary);
+}
+
+.appFilterActive {
+  composes: appFilter;
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+  color: var(--color-black);
+}
+
+/* ── Application Cards ── */
+.appCard {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.appHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-family: var(--font-ui);
+}
+
+.appHeader strong {
+  font-size: var(--font-size-base);
+  color: var(--color-gold);
+}
+
+.appServer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: var(--color-gray-800);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+}
+
+.appDate {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-left: auto;
+}
+
+.appBody {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.appBody strong {
+  color: var(--color-text-secondary);
+}
+
+.appActions {
+  display: flex;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-700);
+}
+
+.appStatus {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-700);
+}
+
+.appStatusApproved {
+  composes: appStatus;
+  color: var(--color-success);
+}
+
+.appStatusDenied {
+  composes: appStatus;
+  color: var(--color-red-light);
+}
+
+/* ── User Rows ── */
+.userRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: var(--space-3);
+  transition: border-color var(--transition-fast);
+}
+
+.userRow:hover {
+  border-color: var(--color-gray-400);
+}
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-ui);
+}
+
+.userInfo strong {
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+}
+
+.adminProfileLink {
+  color: var(--color-gold);
+  text-decoration: none;
+}
+
+.adminProfileLink:hover {
+  color: var(--color-gold-light);
+}
+
+.username {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.userActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.rankSelect {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.rankSelect option {
+  background: var(--color-gray-900);
+}
+
+/* ── Users Grid (Two-Column Layout) ── */
+.usersGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.usersColumn {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+.columnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.08), transparent);
+  border-bottom: 1px solid var(--color-gray-700);
+}
+
+.columnHeader h2 {
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.columnTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.columnIcon {
+  color: #34D399;
+  font-size: 10px;
+}
+
+.columnIconBanned {
+  color: var(--color-red);
+  font-size: var(--font-size-base);
+}
+
+.columnCount {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: #34D399;
+  padding: 1px var(--space-2);
+  background: rgba(52, 211, 153, 0.1);
+  border-radius: var(--border-radius-sm);
+  line-height: 1;
+}
+
+.bannedColumn {
+  border-color: rgba(185, 28, 28, 0.3);
+}
+
+.bannedHeader {
+  background: linear-gradient(135deg, rgba(185, 28, 28, 0.1), transparent);
+}
+
+.bannedCount {
+  color: var(--color-red);
+  background: rgba(185, 28, 28, 0.1);
+}
+
+.columnBody {
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 200px;
+}
+
+.userCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.userCard:hover {
+  border-color: var(--color-gray-400);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bannedCard {
+  border-left: 3px solid var(--color-red);
+}
+
+.bannedCard:hover {
+  border-color: var(--color-red);
+  border-left-color: var(--color-red);
+}
+
+.userCardTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.userCardName {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.userCardName strong {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selfTag {
+  font-size: var(--font-size-xs);
+  color: var(--color-gold);
+  font-weight: 400;
+}
+
+.userCardActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.bannedBadge {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #fff;
+  background: var(--color-red);
+  padding: 2px 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.banInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-gray-700);
+  margin-left: var(--space-1);
+}
+
+.banReason {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.banMeta {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.columnPager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-gray-700);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.pageInfo {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+/* ── Modal ── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.modal {
+  background: var(--color-black-soft, var(--color-gray-900));
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-8);
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+.modalEvent {
+  composes: modal;
+  max-width: 640px;
+}
+
+.modalWide {
+  composes: modal;
+  max-width: 700px;
+}
+
+.modal h3 {
+  margin-bottom: var(--space-6);
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.formGroup label {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-gold);
+}
+
+.formGroup input,
+.formGroup textarea,
+.formGroup select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--color-gray-900);
+  border: 2px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  font-family: var(--font-ui);
+}
+
+.formGroup input:focus,
+.formGroup textarea:focus,
+.formGroup select:focus {
+  outline: none;
+  border-color: var(--color-red);
+}
+
+.formGroup textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.formRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.formGroupGrow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.modalButtons {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+  margin-top: var(--space-6);
+}
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  bottom: var(--space-8);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-gold);
+  color: var(--color-black);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--border-radius-sm);
+  z-index: 3000;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateX(-50%) translateY(100px);
+  }
+  to {
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* ── Role Cards ── */
+.roleCard {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+  transition: border-color var(--transition-fast);
+}
+
+.roleCard:hover {
+  border-color: var(--color-gray-400);
+}
+
+.roleHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-ui);
+  margin-bottom: var(--space-2);
+}
+
+.roleHeader strong {
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+}
+
+.roleName {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.roleDesc {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.rolePerms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.roleActions {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-700);
+}
+
+.colorDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.defaultBadge {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+  padding: 1px 8px;
+  border-radius: var(--border-radius-sm);
+}
+
+.discordBadge {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: rgba(88, 101, 242, 0.15);
+  border: 1px solid var(--color-discord);
+  color: var(--color-discord);
+  padding: 1px 8px;
+  border-radius: var(--border-radius-sm);
+  cursor: help;
+}
+
+.permTag {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-secondary);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+}
+
+/* ── Permission Grid ── */
+.permGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-5);
+}
+
+.permGroup {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-4);
+}
+
+.permGroupTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-gold);
+  margin-bottom: var(--space-3);
+}
+
+.permLabel {
+  display: block;
+  margin-bottom: var(--space-4);
+}
+
+.permCheckbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+}
+
+.permCheckbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-red);
+  cursor: pointer;
+}
+
+.permCheckboxLabel {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.permCheckboxDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Role Assign (User Roles Modal) ── */
+.roleAssign {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: var(--space-2);
+  transition: border-color var(--transition-fast);
+}
+
+.roleAssign:hover {
+  border-color: var(--color-gray-400);
+}
+
+.roleAssign input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-red);
+  cursor: pointer;
+}
+
+.roleAssignLabel {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+/* ── Discord Role Rows ── */
+.discordRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: var(--space-3);
+  transition: border-color var(--transition-fast);
+}
+
+.discordRow:hover {
+  border-color: var(--color-gray-400);
+}
+
+.discordInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-ui);
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.discordColor {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.discordName {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.discordBotBadge {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  background: rgba(88, 101, 242, 0.15);
+  border: 1px solid var(--color-discord);
+  color: #8B9DFF;
+  padding: 1px 8px;
+  border-radius: var(--border-radius-sm);
+  flex-shrink: 0;
+}
+
+.discordSelects {
+  display: flex;
+  gap: var(--space-5);
+  flex-shrink: 0;
+}
+
+.discordLabel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+}
+
+.discordLabel > span {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.discordSelect {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.discordSelect option {
+  background: var(--color-gray-900);
+}
+
+/* ── Reports ── */
+.reportCard {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.reportHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.reportTitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.reportStatus {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid var(--color-gray-600);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 8px;
+  color: var(--color-text-secondary);
+}
+
+.reportStatus_open {
+  border-color: var(--color-red-dark);
+  color: var(--color-red-light);
+  background: rgba(185, 28, 28, 0.15);
+}
+
+.reportStatus_reviewing {
+  border-color: var(--color-gold-dark);
+  color: var(--color-gold);
+  background: rgba(212, 160, 23, 0.14);
+}
+
+.reportStatus_resolved {
+  border-color: var(--color-success);
+  color: var(--color-success);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.reportStatus_dismissed {
+  border-color: var(--color-gray-600);
+  color: var(--color-text-secondary);
+  background: rgba(107, 114, 128, 0.15);
+}
+
+.reportMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.reportReason {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+}
+
+.reportLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.reportLink {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-gold);
+  text-decoration: none;
+}
+
+.reportLink:hover {
+  text-decoration: underline;
+}
+
+.reportActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-700);
+}
+
+.reportNote {
+  margin-top: var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* ── User Reports ── */
+.userReportsSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.userReportModeRow {
+  margin-bottom: var(--space-4);
+}
+
+.userReportFilters {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.005));
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-6) var(--space-7);
+  margin-bottom: 0;
+}
+
+.userReportHint {
+  margin-top: calc(-1 * var(--space-2));
+  margin-bottom: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.userReportGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  column-gap: var(--space-5);
+  row-gap: var(--space-6);
+}
+
+.userReportField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.userReportField span {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.userReportField input,
+.userReportField select {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-3) var(--space-4);
+  min-height: 46px;
+}
+
+.userReportField select {
+  padding-right: var(--space-10);
+}
+
+.userReportField input:focus,
+.userReportField select:focus {
+  outline: none;
+  border-color: var(--color-gold-dark);
+  box-shadow: 0 0 0 1px rgba(212, 160, 23, 0.2);
+}
+
+.userReportActions {
+  margin-top: var(--space-4);
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-800);
+}
+
+.userReportRangeButtons {
+  margin-bottom: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.userReportRangeBtn {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 36px;
+}
+
+.userReportRangeBtn:hover {
+  border-color: var(--color-gray-400);
+  color: var(--color-text-primary);
+}
+
+.userReportRangeBtnActive {
+  composes: userReportRangeBtn;
+  color: var(--color-black);
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+}
+
+.userReportSavedRow {
+  margin-top: var(--space-4);
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) repeat(3, auto);
+  gap: var(--space-2);
+  align-items: center;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-gray-800);
+}
+
+.userReportSavedSelect {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+  min-width: 0;
+  width: 100%;
+}
+
+.userReportActions :global(.btn),
+.userReportSavedRow :global(.btn) {
+  min-height: 38px;
+  padding: 0 var(--space-4);
+}
+
+.userReportSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: 0;
+}
+
+.userReportSummaryCard {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.005));
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.userReportSummaryCard span {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.userReportSummaryCard strong {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-gold);
+  line-height: 1.1;
+}
+
+.userReportBreakdowns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: 0;
+}
+
+.userReportBreakdownRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.userReportBreakdownLabel {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.userReportBreakdownPill {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-primary);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 8px;
+}
+
+.userReportGenerated {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-bottom: 0;
+}
+
+.userReportPagination {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+
+
+.userReportTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-gray-900);
+  margin-top: var(--space-1);
+}
+
+
+.userReportTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1400px;
+  background: var(--color-gray-900);
+}
+
+.userReportTable th,
+.userReportTable td {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-gray-800);
+  white-space: nowrap;
+}
+
+.userReportTable th {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--color-gray-800);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.userReportTable tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.userReportProfileLink {
+  color: var(--color-gold);
+  text-decoration: none;
+}
+
+.userReportProfileLink:hover {
+  text-decoration: underline;
+}
+
+.userReportSub {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.userReportActivityCell {
+  min-width: 150px;
+}
+
+.userReportActivityBadge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--color-gray-600);
+  padding: 2px 8px;
+}
+
+.userReportActivityBadge_active {
+  color: var(--color-success);
+  border-color: var(--color-success);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.userReportActivityBadge_watch {
+  color: var(--color-gold);
+  border-color: var(--color-gold-dark);
+  background: rgba(212, 160, 23, 0.14);
+}
+
+.userReportActivityBadge_inactive {
+  color: var(--color-red-light);
+  border-color: var(--color-red-dark);
+  background: rgba(185, 28, 28, 0.15);
+}
+
+.userReportCharactersCell {
+  white-space: normal !important;
+  min-width: 320px;
+}
+
+.userReportCharacterRow + .userReportCharacterRow {
+  margin-top: var(--space-2);
+}
+
+.userReportCharacterName {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+
+
+.userReportCharacterMeta {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+
+
+.userReportEmptyState {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-5) var(--space-6);
+}
+
+/* ── Helper Text ── */
+.desc {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-6);
+}
+
+/* ── Empty State ── */
+.empty {
+  text-align: center;
+  padding: var(--space-8);
+  font-family: var(--font-ui);
+  color: var(--color-text-secondary);
+}
+
+/* ── Guild Tab ── */
+.guildProfileCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-6) var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+.guildName {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-2xl);
+  color: var(--color-gold);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.guildMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.guildFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+.guildSearchInput {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-gray-900);
+  border: 2px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  min-width: 200px;
+}
+
+.guildSearchInput:focus {
+  outline: none;
+  border-color: var(--color-red);
+}
+
+.guildRosterTable {
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+}
+
+.guildRosterHeader {
+  background: var(--color-gray-800);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-gold);
+  border-bottom: 2px solid var(--color-gray-700);
+}
+
+.guildRow {
+  display: grid;
+  grid-template-columns: 1.8fr 0.4fr 1fr 1fr 0.6fr 1.2fr 1.2fr 0.7fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-gray-800);
+  transition: background var(--transition-fast);
+}
+
+.guildRow:last-child {
+  border-bottom: none;
+}
+
+.guildRow:not(.guildRosterHeader):hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.userRolesRow {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 0.8fr 1.5fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-gray-800);
+  transition: background var(--transition-fast);
+}
+
+.userRolesRow:last-child {
+  border-bottom: none;
+}
+
+.userRolesRow:not(.guildRosterHeader):hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.guildEmpty,
+.guildDiscordMissing {
+  color: var(--color-text-secondary);
+}
+
+.guildSortBtn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.guildSortBtn:hover {
+  color: var(--color-gold-light);
+}
+
+.guildMemberName {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.guildRowBanned {
+  background: rgba(185, 28, 28, 0.12);
+  border-left: 3px solid var(--color-red);
+}
+
+.guildRowClickable {
+  cursor: pointer;
+}
+
+.guildRowClickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.memberDetailGrid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.memberDetailRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.memberDetailLabel {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.guildPagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.guildPageInfo {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.guildPageSizes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.guildPageNav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+
+/* ── Game Rank Mappings ── */
+.gameRankSection {
+  margin-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-6);
+}
+
+.gameRankTitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-xl);
+  color: var(--color-gold);
+  margin: 0 0 var(--space-2);
+}
+
+.gameRankDesc {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-5);
+  line-height: 1.5;
+}
+
+.gameRankTable {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gameRankRow {
+  display: grid;
+  grid-template-columns: 60px 1fr 70px 1fr 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.gameRankRow:last-child {
+  border-bottom: none;
+}
+
+.gameRankHeader {
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.gameRankNum {
+  font-weight: 700;
+  color: var(--color-gold-light);
+  font-family: var(--font-mono, var(--font-ui));
+}
+
+.gameRankCount {
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.gameRankNameInput {
+  background: var(--color-bg-secondary, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.gameRankRow select {
+  background: var(--color-bg-secondary, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tabs {
+    overflow-x: auto;
+  }
+
+  .eventItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .eventActions {
+    width: 100%;
+  }
+
+  .usersGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .userRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .userCardActions {
+    width: 100%;
+  }
+
+  .appHeader {
+    flex-wrap: wrap;
+  }
+
+  .discordRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .discordSelects {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .discordSelect {
+    width: 100%;
+  }
+
+  .guildProfileCard {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .guildRow {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-1);
+  }
+
+  .guildFilters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .guildSearchInput {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .gameRankRow {
+    grid-template-columns: 50px 1fr 50px;
+    gap: var(--space-2);
+  }
+
+  .gameRankRow select,
+  .gameRankNameInput {
+    grid-column: 1 / -1;
+  }
+
+  .userReportSavedRow {
+    grid-template-columns: 1fr;
+    justify-content: flex-start;
+  }
+
+  .userReportSavedSelect {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1100px) {
+  .userReportGrid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .userReportActions {
+    justify-content: flex-start;
+  }
+
+  .userReportSavedRow {
+    grid-template-columns: 1fr auto auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .userReportSavedRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Carousel Management ── */
+.imageManagerPanel {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.imageManagerTitle {
+  margin: 0 0 var(--space-2) 0;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-xl);
+  color: var(--color-gold);
+}
+
+.imageManagerHint {
+  margin: 0 0 var(--space-3) 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.backgroundPreviewWrap {
+  margin-bottom: var(--space-3);
+}
+
+.backgroundPreview {
+  width: 100%;
+  max-height: 220px;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--color-gray-700);
+  object-fit: cover;
+}
+
+.carouselAddForm {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.carouselAddRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.carouselOr {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.carouselUrlInput {
+  flex: 1;
+  min-width: 200px;
+}
+
+.carouselAltInput {
+  flex: 1;
+  min-width: 200px;
+}
+
+.carouselGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+
+.carouselCard {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+}
+
+.carouselThumb {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  display: block;
+}
+
+.carouselCardBody {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.carouselCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.carouselOrderLabel {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.carouselOrderInput {
+  width: 60px;
+}

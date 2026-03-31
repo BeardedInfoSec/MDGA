@@ -1,0 +1,8 @@
+{
+  "serverUrl": "https://your-mdga-server.com",
+  "token": "YOUR_JWT_TOKEN_HERE",
+  "wowPath": "C:/Program Files (x86)/World of Warcraft/_retail_",
+  "accountName": "YOUR_WOW_ACCOUNT_NAME",
+  "pollIntervalMs": 5000,
+  "debug": false
+}
