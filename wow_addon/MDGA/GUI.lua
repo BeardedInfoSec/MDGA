@@ -566,8 +566,8 @@ rosterHeader:SetHeight(16)
 rosterHeader:SetPoint("TOPLEFT", rosterToolbar, "BOTTOMLEFT", 0, -4)
 rosterHeader:SetPoint("TOPRIGHT", rosterToolbar, "BOTTOMRIGHT", 0, -4)
 
-local rosterColNames  = { "Name", "Class", "Rank", "Lvl", "Zone", "Last Seen" }
-local rosterColWidths = { 140, 85, 90, 35, 115, 80 }
+local rosterColNames  = { "Name", "Class", "Rank", "Lvl", "Zone", "Last Seen", "Note" }
+local rosterColWidths = { 130, 80, 85, 30, 90, 70, 140 }
 xOff = 4
 for i, h in ipairs(rosterColNames) do
     local fs = rosterHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -834,6 +834,9 @@ function ns:RefreshRosterTab()
             row.lastSeen = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             row.lastSeen:SetPoint("LEFT", row.zone, "RIGHT", 0, 0)
             row.lastSeen:SetWidth(rosterColWidths[6]); row.lastSeen:SetJustifyH("LEFT"); row.lastSeen:SetWordWrap(false)
+            row.note = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            row.note:SetPoint("LEFT", row.lastSeen, "RIGHT", 0, 0)
+            row.note:SetWidth(rosterColWidths[7]); row.note:SetJustifyH("LEFT"); row.note:SetWordWrap(false)
             local rowIdx = i
             row:SetScript("OnClick", function()
                 if selectedRowIdx and rosterRows[selectedRowIdx] then
@@ -856,7 +859,10 @@ function ns:RefreshRosterTab()
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 local cc = ns.CLASS_COLORS[m.class] or C_WHITE
                 local hex = string.format("%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255)
-                GameTooltip:AddLine("|cff" .. hex .. (m.name or "?") .. "|r", 1, 1, 1)
+                -- Defensive: strip any stray realm suffix so cross-realm names
+                -- never render as "Name-Realm-Realm-Realm" in the tooltip.
+                local cleanName = (m.name or "?"):match("^([^%-]+)") or m.name or "?"
+                GameTooltip:AddLine("|cff" .. hex .. cleanName .. "|r", 1, 1, 1)
                 GameTooltip:AddDoubleLine("Class", CLASS_DISPLAY_NAMES[m.class] or m.class or "?", 0.5, 0.5, 0.5, cc.r, cc.g, cc.b)
                 GameTooltip:AddDoubleLine("Level", tostring(m.level or "?"), 0.5, 0.5, 0.5, 1, 1, 1)
                 GameTooltip:AddDoubleLine("Rank", (m.rankName or "?") .. " (#" .. tostring(m.rankIndex or "?") .. ")", 0.5, 0.5, 0.5, 1, 1, 1)
@@ -897,6 +903,16 @@ function ns:RefreshRosterTab()
                 row.lastSeen:SetTextColor(C_DIM.r, C_DIM.g, C_DIM.b)
             else
                 row.lastSeen:SetText("?"); row.lastSeen:SetTextColor(C_DIM.r, C_DIM.g, C_DIM.b)
+            end
+            -- Note column: prefer officer note (gold) over public note (dim).
+            local offNote = m.officerNote or ""
+            local pubNote = m.publicNote or ""
+            if offNote ~= "" then
+                row.note:SetText(offNote); row.note:SetTextColor(C_GOLD.r, C_GOLD.g, C_GOLD.b)
+            elseif pubNote ~= "" then
+                row.note:SetText(pubNote); row.note:SetTextColor(C_DIM.r, C_DIM.g, C_DIM.b)
+            else
+                row.note:SetText(""); row.note:SetTextColor(C_DIM.r, C_DIM.g, C_DIM.b)
             end
             if selectedRowIdx == i then row.highlight:Show() else row.highlight:Hide() end
             row:Show()
@@ -1722,17 +1738,35 @@ genReportBtn:SetScript("OnClick", function()
         roster      = rosterList,
     }
 
+    -- Self-owned countdown overlay (avoids touching Blizzard's RaidWarningFrame,
+    -- which can taint secure calls and surface as "Interface action failed
+    -- because of an addon" when ReloadUI fires).
+    if not ns.reportCountdownFrame then
+        local f = CreateFrame("Frame", "MDGAReportCountdown", UIParent)
+        f:SetSize(420, 60)
+        f:SetPoint("TOP", UIParent, "TOP", 0, -160)
+        f:SetFrameStrata("FULLSCREEN_DIALOG")
+        f.bg = f:CreateTexture(nil, "BACKGROUND")
+        f.bg:SetAllPoints()
+        f.bg:SetColorTexture(0, 0, 0, 0.75)
+        f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        f.text:SetPoint("CENTER")
+        f.text:SetTextColor(1, 0.6, 0.1)
+        f:Hide()
+        ns.reportCountdownFrame = f
+    end
+    local overlay = ns.reportCountdownFrame
+    overlay:Show()
+    print("|cffff9900[MDGA]|r Generating roster report — UI will reload in 5 seconds.")
+
     local countdown = 5
     local function tick()
         if countdown <= 0 then
-            ReloadUI()
+            overlay:Hide()
+            C_Timer.After(0, function() ReloadUI() end)
             return
         end
-        RaidNotice_AddMessage(
-            RaidWarningFrame,
-            "|cffff9900[MDGA]|r Generating report — reloading in " .. countdown .. "s",
-            ChatTypeInfo["RAID_WARNING"]
-        )
+        overlay.text:SetText("[MDGA] Generating report — reloading in " .. countdown .. "s")
         countdown = countdown - 1
         C_Timer.After(1, tick)
     end
