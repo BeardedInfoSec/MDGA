@@ -517,6 +517,7 @@ export default function Home() {
               {[
                 { rank: 'Guild Master', name: 'Cawkadoodle', cls: 'Blood Death Knight', desc: 'Co-founder and commanding presence on the battlefield. Under his leadership, MDGA grew from a handful of recruits into the #1 PvP force in North America.' },
                 { rank: 'Chieftain', name: 'Druzak', cls: 'Hunter', desc: "Co-founder and tactical mastermind. Druzak coordinates the flanks and built the recruitment pipeline that fueled MDGA's explosive growth across multiple server shards." },
+                { rank: 'Warlord', name: 'Nemy', cls: 'Discipline Priest', desc: 'The hidden architect of the War Council. Nemy bridges battlefield chaos with high-command precision, shielding the front line while engineering the backend that tracks every MDGA victory.' },
               ].map((l) => (
                 <div key={l.name} className={`card ${styles.leaderPreview}`}>
                   <span className={styles.leaderRank}>{l.rank}</span>
