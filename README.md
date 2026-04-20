@@ -273,6 +273,7 @@ PM2 configuration is in `ecosystem.config.js`:
 - Auto-restart with exponential backoff (1s → 2s → 4s... up to 15s)
 - 512MB memory limit (restarts if exceeded)
 - Logs written to `logs/pm2-out.log` and `logs/pm2-error.log`
+- `interpreter` pinned to the nvm Node 24 binary so pm2 never falls back to the system `/usr/bin/node` (which is Node 12 on the current production box and cannot parse modern syntax). Override with `PM2_INTERPRETER=/path/to/node` if the nvm install moves.
 
 ### Development
 
@@ -1265,6 +1266,19 @@ npm install sharp
 pm2 startup systemd
 # Run the sudo command it prints
 pm2 save
+```
+
+**SyntaxError: Unexpected token '.' on startup**
+
+This means pm2 is running the app under an older Node (e.g. system `/usr/bin/node` which is Node 12 on the current production box) that can't parse optional chaining. The `interpreter` key in `ecosystem.config.js` pins the correct Node binary. If you see this error:
+
+```bash
+# Confirm which Node pm2 is actually using for the app
+pm2 env 0 | grep node_version
+
+# Fix: ensure ecosystem.config.js has interpreter set, then re-create the process
+cd ~/MDGA && git pull
+pm2 delete mdga && pm2 start ecosystem.config.js && pm2 save
 ```
 
 **Frontend changes not showing**

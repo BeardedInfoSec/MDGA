@@ -3,6 +3,10 @@ module.exports = {
     {
       name: 'mdga',
       script: 'server/index.js',
+      // Pin the Node interpreter so pm2 doesn't fall back to the system /usr/bin/node
+      // (Node 12 on this host), which cannot parse modern syntax (e.g. optional chaining).
+      // Override via PM2_INTERPRETER env var if the nvm path changes.
+      interpreter: process.env.PM2_INTERPRETER || '/home/mdga/.nvm/versions/node/v24.12.0/bin/node',
       instances: 1,
       autorestart: true,
       watch: false,
