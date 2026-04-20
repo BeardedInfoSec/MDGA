@@ -5,7 +5,7 @@
 -- ================================================
 local addonName, ns = ...
 
-ns.VERSION = "12.0.1"
+ns.VERSION = "1.4.0"
 ns.SCHEMA_VERSION = 3
 ns.OFFICER_RANK_THRESHOLD = 2 -- 0=GM, 1=Officer, 2=Senior Officer
 

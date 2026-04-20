@@ -2,7 +2,7 @@
 ## Title: MDGA Guild Tracker
 ## Notes: Guild roster tracking, event logging, calendar with website event import & alerts, bank monitor, stats dashboard, mass whisper, promote/demote, attendance, auto-messages, and website sync. Officer-only.
 ## Author: Make Durotar Great Again
-## Version: 12.0.1
+## Version: 1.4.0
 ## SavedVariables: MDGA_Data
 
 Core.lua
