@@ -89,6 +89,22 @@ function formatDateMMDDYYYY(epochSec) {
   return `${mm}-${dd}-${yyyy}`;
 }
 
+function formatTimeHHMMSS(epochSec) {
+  const d = epochSec ? new Date(epochSec * 1000) : new Date();
+  return `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
+}
+
+// Sanitize a guild name for use in a filename: replace spaces and any
+// character that Windows/POSIX disallows with underscores, collapse runs.
+function slugifyGuildName(name) {
+  return String(name || 'Unknown')
+    .trim()
+    .replace(/[\\/:*?"<>|\s]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    || 'Unknown';
+}
+
 function writeReportCsv(report) {
   if (!report || !Array.isArray(report.roster)) return null;
   const header = [
@@ -118,7 +134,10 @@ function writeReportCsv(report) {
 
   const dir = getDesktopPath();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const filename = `MDGA_roster_${formatDateMMDDYYYY(report.generatedAt)}.csv`;
+  const guildSlug = slugifyGuildName(report.guildInfo && report.guildInfo.name);
+  const date = formatDateMMDDYYYY(report.generatedAt);
+  const time = formatTimeHHMMSS(report.generatedAt);
+  const filename = `MDGA_roster_${guildSlug}_${date}_${time}.csv`;
   const outPath = path.join(dir, filename);
   fs.writeFileSync(outPath, lines.join('\r\n'), 'utf8');
   return outPath;
