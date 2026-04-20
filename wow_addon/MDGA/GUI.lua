@@ -1683,6 +1683,61 @@ exportJsonBtn:SetScript("OnClick", function()
 
     ShowExportPopup("Site Reconciliation JSON (" .. count .. " members)", table.concat(parts, ""))
 end)
+
+-- Generate Report → stages the full roster into MDGA_Data.pendingReport,
+-- warns with a countdown, then /reload so SavedVariables flush to disk.
+-- The companion app watches the file and writes a CSV to the user's Desktop.
+local genReportBtn = CreateFrame("Button", nil, toolsContent, "UIPanelButtonTemplate")
+genReportBtn:SetSize(180, 22)
+genReportBtn:SetPoint("LEFT", exportJsonBtn, "RIGHT", 8, 0)
+genReportBtn:SetText("Generate Report (CSV)")
+genReportBtn:SetScript("OnClick", function()
+    if InCombatLockdown and InCombatLockdown() then
+        print("|cffff5555[MDGA]|r Cannot generate report while in combat. Try again after.")
+        return
+    end
+
+    -- Stage the report payload inside MDGA_Data so one SV file covers everything.
+    local roster = MDGA_Data and MDGA_Data.roster or {}
+    local rosterList = {}
+    for _, m in pairs(roster) do
+        table.insert(rosterList, {
+            name        = m.name,
+            realmSlug   = m.realmSlug,
+            class       = m.class,
+            level       = m.level,
+            rankIndex   = m.rankIndex,
+            rankName    = m.rankName,
+            isOnline    = m.isOnline or false,
+            zone        = m.zone or "",
+            lastSeen    = m.lastSeen or 0,
+            publicNote  = m.publicNote or "",
+            officerNote = m.officerNote or "",
+        })
+    end
+    MDGA_Data.pendingReport = {
+        generatedAt = time(),
+        generatedBy = MDGA_Data.playerInfo and MDGA_Data.playerInfo.name or "",
+        guildInfo   = MDGA_Data.guildInfo or {},
+        roster      = rosterList,
+    }
+
+    local countdown = 5
+    local function tick()
+        if countdown <= 0 then
+            ReloadUI()
+            return
+        end
+        RaidNotice_AddMessage(
+            RaidWarningFrame,
+            "|cffff9900[MDGA]|r Generating report — reloading in " .. countdown .. "s",
+            ChatTypeInfo["RAID_WARNING"]
+        )
+        countdown = countdown - 1
+        C_Timer.After(1, tick)
+    end
+    tick()
+end)
 y = y - 36
 
 -- Invite Tool section

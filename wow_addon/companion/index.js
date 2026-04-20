@@ -8,6 +8,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const chokidar = require('chokidar');
@@ -43,7 +44,7 @@ function loadState() {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch {
-    return { lastSyncedEventId: null, lastRosterHash: null, lastSyncTimestamp: 0 };
+    return { lastSyncedEventId: null, lastRosterHash: null, lastSyncTimestamp: 0, lastReportAt: 0 };
   }
 }
 
@@ -62,6 +63,65 @@ function loadQueue() {
 
 function saveQueue(queue) {
   fs.writeFileSync(QUEUE_FILE, JSON.stringify(queue, null, 2));
+}
+
+// ── CSV report writer ──
+// Triggered when the addon stages MDGA_Data.pendingReport via the in-game
+// "Generate Report" button + /reload. Writes to the user's Desktop as
+// MDGA_roster_MM-DD-YYYY.csv. Overwrites on same-day reruns.
+function csvEscape(val) {
+  const s = val == null ? '' : String(val);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function getDesktopPath() {
+  // Allow config override; otherwise use OS default.
+  if (config.reportDir) return config.reportDir;
+  return path.join(os.homedir(), 'Desktop');
+}
+
+function formatDateMMDDYYYY(epochSec) {
+  const d = epochSec ? new Date(epochSec * 1000) : new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${mm}-${dd}-${yyyy}`;
+}
+
+function writeReportCsv(report) {
+  if (!report || !Array.isArray(report.roster)) return null;
+  const header = [
+    'Name', 'Realm', 'Class', 'Level', 'Rank', 'RankIndex',
+    'Online', 'Zone', 'LastSeen', 'PublicNote', 'OfficerNote',
+  ];
+  const lines = [header.map(csvEscape).join(',')];
+
+  const sorted = [...report.roster].sort((a, b) => {
+    const ra = (a.rankIndex ?? 99) - (b.rankIndex ?? 99);
+    if (ra !== 0) return ra;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  for (const m of sorted) {
+    const lastSeenStr = m.lastSeen
+      ? new Date(m.lastSeen * 1000).toISOString().replace('T', ' ').slice(0, 19)
+      : '';
+    lines.push([
+      m.name, m.realmSlug, m.class, m.level ?? '',
+      m.rankName, m.rankIndex ?? '',
+      m.isOnline ? 'Yes' : 'No',
+      m.zone, lastSeenStr,
+      m.publicNote, m.officerNote,
+    ].map(csvEscape).join(','));
+  }
+
+  const dir = getDesktopPath();
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const filename = `MDGA_roster_${formatDateMMDDYYYY(report.generatedAt)}.csv`;
+  const outPath = path.join(dir, filename);
+  fs.writeFileSync(outPath, lines.join('\r\n'), 'utf8');
+  return outPath;
 }
 
 // ── Roster hashing for change detection ──
@@ -121,6 +181,25 @@ async function processFile() {
   if (data.version !== 3) {
     console.log(`[MDGA] Unsupported schema version: ${data.version}. Expected 3.`);
     return;
+  }
+
+  // ── Desktop CSV report: independent of the /sync flow. If the user clicked
+  //    "Generate Report" in-game, pendingReport has a fresh generatedAt. We
+  //    write a CSV to Desktop once per unique generatedAt, then continue to
+  //    the normal sync below.
+  const stateForReport = loadState();
+  const report = data.pendingReport;
+  if (report && Number(report.generatedAt) > Number(stateForReport.lastReportAt || 0)) {
+    try {
+      const outPath = writeReportCsv(report);
+      if (outPath) {
+        console.log(`[MDGA] CSV report written: ${outPath} (${(report.roster || []).length} members)`);
+        stateForReport.lastReportAt = Number(report.generatedAt);
+        saveState(stateForReport);
+      }
+    } catch (err) {
+      console.error(`[MDGA] CSV report failed: ${err.message}`);
+    }
   }
 
   // ── OFFICER CHECK (companion-level hard stop) ──
