@@ -42,6 +42,7 @@ const GUILD_GAP_LINK_STATES = new Set([
   'no_discord_link',
   'discord_not_active',
   'linked_active',
+  'alt_without_main',
   'all',
 ]);
 const USER_REPORT_VIEWS = new Set([
@@ -710,6 +711,18 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
       filters.push('gm.linked_user_id IS NOT NULL AND u.discord_id IS NOT NULL AND u.discord_id <> \'\' AND u.status = \'active\'');
     } else if (linkState === 'needs_discord') {
       filters.push('(gm.linked_user_id IS NULL OR u.discord_id IS NULL OR u.discord_id = \'\' OR u.status <> \'active\')');
+    } else if (linkState === 'alt_without_main') {
+      // Guild member is linked to a site user, but that user has no character flagged is_main.
+      filters.push(`gm.linked_user_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM user_characters uc_main
+          WHERE uc_main.user_id = gm.linked_user_id AND uc_main.is_main = TRUE
+        )`);
+    }
+
+    // Hide rows an officer has dismissed for now.
+    if (!parseBoolParam(req.query.include_ignored)) {
+      filters.push('(gm.reconciliation_ignored_until IS NULL OR gm.reconciliation_ignored_until <= NOW())');
     }
 
     const activityWindow = resolveActivityWindow(activityRangeRaw, activityFromRaw, activityToRaw);
@@ -813,6 +826,10 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
           SUM(CASE WHEN gm.linked_user_id IS NOT NULL AND (u.discord_id IS NULL OR u.discord_id = '') THEN 1 ELSE 0 END) AS no_discord_link,
           SUM(CASE WHEN gm.linked_user_id IS NOT NULL AND u.status <> 'active' THEN 1 ELSE 0 END) AS discord_not_active,
           SUM(CASE WHEN gm.linked_user_id IS NOT NULL AND u.discord_id IS NOT NULL AND u.discord_id <> '' AND u.status = 'active' THEN 1 ELSE 0 END) AS linked_active,
+          SUM(CASE WHEN gm.linked_user_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM user_characters uc_main
+            WHERE uc_main.user_id = gm.linked_user_id AND uc_main.is_main = TRUE
+          ) THEN 1 ELSE 0 END) AS alt_without_main,
           SUM(CASE WHEN ${GUILD_GAP_LAST_SEEN_EXPR} >= DATE_SUB(NOW(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS active_14d,
           SUM(CASE WHEN ${GUILD_GAP_LAST_SEEN_EXPR} >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS active_30d,
           SUM(CASE WHEN ${GUILD_GAP_LAST_SEEN_EXPR} < DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS inactive_30d,
@@ -991,6 +1008,130 @@ router.put('/:id', requireAuth, requirePermission('admin.view_panel'), async (re
   } catch (err) {
     console.error('Update report error:', err);
     res.status(500).json({ error: 'Failed to update report' });
+  }
+});
+
+// ================================================
+// GET /api/reports/discord-orphans
+// Discord members who aren't linked to any site user, and site users whose
+// Discord account is no longer in the server. Sources from discord_members
+// (populated by the 30-minute bulk sync) joined to users.discord_id.
+// ================================================
+router.get('/discord-orphans', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const bucket = String(req.query.bucket || 'orphan_discord_member').trim();
+    const filters = [];
+    const params = [];
+
+    if (bucket === 'orphan_discord_member') {
+      // In Discord, no matching site user.
+      filters.push('dm.is_in_guild = TRUE');
+      filters.push('u.id IS NULL');
+    } else if (bucket === 'user_left_discord') {
+      // Site user has a discord_id but that member is no longer in the server.
+      filters.push('u.id IS NOT NULL');
+      filters.push('(dm.is_in_guild = FALSE OR dm.id IS NULL)');
+    } else {
+      return res.status(400).json({ error: 'Unknown bucket. Use orphan_discord_member or user_left_discord.' });
+    }
+
+    if (q) {
+      const term = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
+      filters.push('(dm.username LIKE ? OR dm.nickname LIKE ? OR dm.display_name LIKE ? OR u.username LIKE ? OR u.display_name LIKE ?)');
+      params.push(term, term, term, term, term);
+    }
+
+    if (bucket === 'orphan_discord_member') {
+      const [rows] = await pool.execute(
+        `SELECT dm.id, dm.discord_id, dm.username, dm.display_name, dm.nickname,
+                dm.joined_at, dm.roles_json, dm.last_synced_at
+         FROM discord_members dm
+         LEFT JOIN users u ON u.discord_id = dm.discord_id
+         ${filters.length ? 'WHERE ' + filters.join(' AND ') : ''}
+         ORDER BY dm.joined_at DESC
+         LIMIT 500`,
+        params
+      );
+      return res.json({ bucket, rows });
+    } else {
+      // user_left_discord
+      const [rows] = await pool.execute(
+        `SELECT u.id AS user_id, u.username, u.display_name, u.discord_id, u.discord_username,
+                u.status, u.created_at,
+                dm.left_at, dm.last_synced_at
+         FROM users u
+         LEFT JOIN discord_members dm ON dm.discord_id = u.discord_id
+         WHERE u.discord_id IS NOT NULL AND u.discord_id <> ''
+           AND ${filters.slice(1).join(' AND ')}`,
+        params
+      );
+      return res.json({ bucket, rows });
+    }
+  } catch (err) {
+    console.error('[Reports] discord-orphans error:', err);
+    res.status(500).json({ error: 'Failed to load Discord orphan report' });
+  }
+});
+
+// ================================================
+// GET /api/reports/spelling-mismatches
+// Levenshtein ≤ 2 near-matches between unlinked guild_members and
+// user_characters/users.character_name. Computed in-process on the current
+// primary-guild roster; results cached in-memory for 60s.
+// ================================================
+const { bestNearMatch } = require('../utils/levenshtein');
+let spellingCache = { expiresAt: 0, rows: [] };
+router.get('/spelling-mismatches', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const now = Date.now();
+    if (spellingCache.expiresAt > now && !parseBoolParam(req.query.force)) {
+      return res.json({ cached: true, rows: spellingCache.rows });
+    }
+
+    const [guildRow] = await pool.execute('SELECT id FROM guilds WHERE is_primary = TRUE LIMIT 1');
+    if (guildRow.length === 0) return res.json({ rows: [] });
+    const guildId = guildRow[0].id;
+
+    const [unlinked] = await pool.execute(
+      `SELECT gm.id, gm.character_name, gm.realm_slug, gm.guild_rank_name
+       FROM guild_members gm
+       WHERE gm.guild_id = ? AND gm.linked_user_id IS NULL
+         AND (gm.reconciliation_ignored_until IS NULL OR gm.reconciliation_ignored_until <= NOW())`,
+      [guildId]
+    );
+
+    const [candidates] = await pool.execute(
+      `SELECT uc.character_name AS value, uc.realm_slug, u.id AS user_id, u.username, u.display_name, uc.id AS character_id
+       FROM user_characters uc
+       JOIN users u ON u.id = uc.user_id AND u.status = 'active'`
+    );
+
+    const rows = [];
+    for (const gm of unlinked) {
+      // Narrow candidate pool to same realm to keep comparisons cheap.
+      const pool2 = candidates.filter((c) => c.realm_slug === gm.realm_slug);
+      const match = bestNearMatch(gm.character_name, pool2, 2);
+      if (match) {
+        rows.push({
+          guild_member_id: gm.id,
+          guild_character: gm.character_name,
+          realm_slug: gm.realm_slug,
+          suggested_user_id: match.entry.user_id,
+          suggested_character_id: match.entry.character_id,
+          suggested_username: match.entry.username,
+          suggested_display_name: match.entry.display_name,
+          suggested_character: match.entry.value,
+          distance: match.distance,
+        });
+      }
+    }
+
+    spellingCache = { expiresAt: now + 60 * 1000, rows };
+    res.json({ cached: false, rows });
+  } catch (err) {
+    console.error('[Reports] spelling-mismatches error:', err);
+    res.status(500).json({ error: 'Failed to compute spelling mismatches' });
   }
 });
 

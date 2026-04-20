@@ -65,15 +65,17 @@ local function ScanRoster()
             local key = charName .. "-" .. charRealm
 
             newRoster[key] = {
-                name      = charName,
-                realmSlug = charRealm,
-                class     = classFileName,
-                level     = level,
-                rankIndex = rankIndex,
-                rankName  = rankName,
-                isOnline  = isOnline or false,
-                zone      = zone or "",
-                lastSeen  = time(),
+                name        = charName,
+                realmSlug   = charRealm,
+                class       = classFileName,
+                level       = level,
+                rankIndex   = rankIndex,
+                rankName    = rankName,
+                isOnline    = isOnline or false,
+                zone        = zone or "",
+                lastSeen    = time(),
+                publicNote  = publicNote or "",
+                officerNote = officerNote or "",
             }
 
             local old = MDGA_Data.roster[key]

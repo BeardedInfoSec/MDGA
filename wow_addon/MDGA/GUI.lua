@@ -1646,6 +1646,43 @@ exportEventsBtn:SetScript("OnClick", function()
     end
     ShowExportPopup("Export Events (" .. #events .. ")", table.concat(lines, "\n"))
 end)
+
+-- Export the roster as JSON for the website Reconciliation tab's paste-ingest.
+-- Includes officer/public notes and lastSeen so they reach the reconciliation
+-- dashboard without the companion app.
+local exportJsonBtn = CreateFrame("Button", nil, toolsContent, "UIPanelButtonTemplate")
+exportJsonBtn:SetSize(130, 22)
+exportJsonBtn:SetPoint("LEFT", exportEventsBtn, "RIGHT", 8, 0)
+exportJsonBtn:SetText("Export JSON (site)")
+exportJsonBtn:SetScript("OnClick", function()
+    local roster = MDGA_Data and MDGA_Data.roster or {}
+    local guildInfo = MDGA_Data and MDGA_Data.guildInfo or {}
+
+    local function esc(s)
+        s = tostring(s or "")
+        s = s:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+        return s
+    end
+
+    local parts = {}
+    table.insert(parts, '{"guildInfo":{"name":"' .. esc(guildInfo.name or "") .. '","faction":"' .. esc(guildInfo.faction or "") .. '"},"roster":[')
+
+    local first = true
+    local count = 0
+    for _, m in pairs(roster) do
+        if not first then table.insert(parts, ",") end
+        first = false
+        count = count + 1
+        table.insert(parts, string.format(
+            '{"name":"%s","realmSlug":"%s","rankName":"%s","rankIndex":%d,"officerNote":"%s","publicNote":"%s","lastSeen":%d}',
+            esc(m.name), esc(m.realmSlug), esc(m.rankName or ""), tonumber(m.rankIndex) or 0,
+            esc(m.officerNote or ""), esc(m.publicNote or ""), tonumber(m.lastSeen) or 0
+        ))
+    end
+    table.insert(parts, "]}")
+
+    ShowExportPopup("Site Reconciliation JSON (" .. count .. " members)", table.concat(parts, ""))
+end)
 y = y - 36
 
 -- Invite Tool section

@@ -258,6 +258,15 @@ export default function Admin() {
   const [savedReportCsvExporting, setSavedReportCsvExporting] = useState(false);
   const isGuildGapView = userReportView === 'guild_discord_gaps';
 
+  // ── Reconciliation state ──
+  const [reconGaps, setReconGaps] = useState({ rows: [], summary: null });
+  const [reconOrphans, setReconOrphans] = useState({ in_discord: [], left_discord: [] });
+  const [reconSpelling, setReconSpelling] = useState([]);
+  const [reconLoading, setReconLoading] = useState(false);
+  const [reconLastRefresh, setReconLastRefresh] = useState(null);
+  const [reconIngestText, setReconIngestText] = useState('');
+  const [reconIngestBusy, setReconIngestBusy] = useState(false);
+
   // ── Carousel state ──
   const [carouselImages, setCarouselImages] = useState([]);
   const [carouselForm, setCarouselForm] = useState({ imageUrl: '', altText: '', file: null, sortOrder: '' });
@@ -699,6 +708,7 @@ export default function Admin() {
     else if (activeTab === 'user-roles') loadUsers();
     else if (activeTab === 'discord-roles') { loadDiscordGuildRoles(); loadDiscordMappings(); loadRoles(); }
     else if (activeTab === 'guild') { loadGuildProfile(); loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter); loadTrackedGuilds(); loadBannedUsers(); }
+    else if (activeTab === 'reconciliation') { loadReconciliation(); }
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load game rank mappings when guild profile is available
@@ -1540,6 +1550,7 @@ export default function Admin() {
     { id: 'applications', label: 'Applications' },
     { id: 'reports', label: 'Forum Violations' },
     { id: 'user-reports', label: 'User Reports' },
+    { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'guild', label: 'Guild' },
     { id: 'roles', label: 'Roles' },
     ...(gm ? [
@@ -1547,6 +1558,98 @@ export default function Admin() {
       { id: 'discord-roles', label: 'Discord Roles' },
     ] : []),
   ];
+
+  // ── Reconciliation loader ──
+  const loadReconciliation = useCallback(async () => {
+    setReconLoading(true);
+    try {
+      const [gapsRes, orphansInRes, orphansOutRes, spellingRes] = await Promise.all([
+        apiFetch('/api/reports/guild-gaps?link_state=all&limit=500'),
+        apiFetch('/api/reports/discord-orphans?bucket=orphan_discord_member'),
+        apiFetch('/api/reports/discord-orphans?bucket=user_left_discord'),
+        apiFetch('/api/reports/spelling-mismatches'),
+      ]);
+      const gaps = gapsRes.ok ? await gapsRes.json() : { rows: [], summary: null };
+      const orphansIn = orphansInRes.ok ? await orphansInRes.json() : { rows: [] };
+      const orphansOut = orphansOutRes.ok ? await orphansOutRes.json() : { rows: [] };
+      const spelling = spellingRes.ok ? await spellingRes.json() : { rows: [] };
+      setReconGaps({ rows: gaps.rows || [], summary: gaps.summary || null });
+      setReconOrphans({ in_discord: orphansIn.rows || [], left_discord: orphansOut.rows || [] });
+      setReconSpelling(spelling.rows || []);
+      setReconLastRefresh(new Date());
+    } catch (err) {
+      showToast('Failed to load reconciliation data');
+      console.error(err);
+    } finally {
+      setReconLoading(false);
+    }
+  }, [apiFetch, showToast]);
+
+  const refreshReconSources = useCallback(async () => {
+    setReconLoading(true);
+    try {
+      const res = await apiFetch('/api/reconciliation/refresh', { method: 'POST' });
+      if (!res.ok) {
+        showToast('Refresh failed');
+        return;
+      }
+      await loadReconciliation();
+      showToast('Reconciliation sources refreshed');
+    } catch {
+      showToast('Refresh failed');
+    } finally {
+      setReconLoading(false);
+    }
+  }, [apiFetch, loadReconciliation, showToast]);
+
+  const ingestAddonPaste = useCallback(async () => {
+    if (!reconIngestText.trim()) return;
+    setReconIngestBusy(true);
+    try {
+      let body;
+      try { body = JSON.parse(reconIngestText); }
+      catch { showToast('Paste is not valid JSON'); return; }
+      const res = await apiFetch('/api/reconciliation/addon-paste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Ingest failed');
+        return;
+      }
+      if (data.skipped) {
+        showToast(`Already ingested at ${new Date(data.previously_ingested_at).toLocaleString()}`);
+      } else {
+        showToast(`Ingested ${data.roster_count} rows (${data.matched} matched, ${data.unmatched_count} unmatched)`);
+        setReconIngestText('');
+        await loadReconciliation();
+      }
+    } finally {
+      setReconIngestBusy(false);
+    }
+  }, [apiFetch, loadReconciliation, reconIngestText, showToast]);
+
+  const linkGuildMember = useCallback(async (memberId, userId) => {
+    const res = await apiFetch(`/api/reconciliation/guild-members/${memberId}/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (res.ok) { showToast('Member linked'); await loadReconciliation(); }
+    else showToast('Link failed');
+  }, [apiFetch, loadReconciliation, showToast]);
+
+  const ignoreGuildMember = useCallback(async (memberId, days = 30) => {
+    const res = await apiFetch(`/api/reconciliation/guild-members/${memberId}/ignore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days }),
+    });
+    if (res.ok) { showToast(`Ignored for ${days} days`); await loadReconciliation(); }
+    else showToast('Ignore failed');
+  }, [apiFetch, loadReconciliation, showToast]);
 
   const toggleGuildSort = (col) => {
     if (guildSort === col) {
@@ -2831,6 +2934,224 @@ export default function Admin() {
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {/* ── Reconciliation Tab ── */}
+        {activeTab === 'reconciliation' && (
+          <div>
+            <div className={styles.header}>
+              <h2>Guild &harr; Discord Reconciliation</h2>
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={refreshReconSources}
+                  disabled={reconLoading}
+                >
+                  {reconLoading ? 'Refreshing...' : 'Refresh Sources'}
+                </button>
+              </div>
+            </div>
+            {reconLastRefresh && (
+              <p style={{ color: 'var(--color-text-muted, #888)', marginBottom: '1rem' }}>
+                Last refresh: {reconLastRefresh.toLocaleString()}
+              </p>
+            )}
+
+            {/* Summary counters */}
+            {reconGaps.summary && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                {[
+                  ['Total guild members', reconGaps.summary.total_members],
+                  ['Needs Discord link', reconGaps.summary.needs_discord],
+                  ['No site account', reconGaps.summary.no_site_account],
+                  ['Alt without main', reconGaps.summary.alt_without_main],
+                  ['Orphan Discord', reconOrphans.in_discord.length],
+                  ['Users who left Discord', reconOrphans.left_discord.length],
+                  ['Spelling near-matches', reconSpelling.length],
+                ].map(([label, value]) => (
+                  <div key={label} className="card" style={{ padding: '0.75rem' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{value ?? 0}</div>
+                    <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--color-text-muted, #888)' }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Paste-ingest box */}
+            <details className="card" style={{ padding: '1rem', marginBottom: '1.5rem' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ingest addon JSON (officer notes / last-seen)</summary>
+              <p style={{ marginTop: '0.5rem', color: 'var(--color-text-muted, #888)' }}>
+                In-game, open the MDGA addon tools panel and click "Export JSON" (addon v4+), then paste the payload here.
+                Notes and last-seen values will be merged onto the guild_members rows.
+              </p>
+              <textarea
+                value={reconIngestText}
+                onChange={(e) => setReconIngestText(e.target.value)}
+                placeholder='{"guildInfo": {...}, "roster": [...]}'
+                rows={6}
+                style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.85rem' }}
+              />
+              <div style={{ marginTop: '0.5rem' }}>
+                <button type="button" className="btn btn--primary" onClick={ingestAddonPaste} disabled={reconIngestBusy || !reconIngestText.trim()}>
+                  {reconIngestBusy ? 'Ingesting...' : 'Ingest'}
+                </button>
+              </div>
+            </details>
+
+            {/* Category: Needs Discord Link (no_site_account + no_discord_link + discord_not_active) */}
+            {(() => {
+              const buckets = [
+                { key: 'no_site_account', label: 'In guild, no site account' },
+                { key: 'no_discord_link', label: 'In guild, site account, no Discord linked' },
+                { key: 'discord_not_active', label: 'In guild, left Discord (site user suspended)' },
+                { key: 'alt_without_main', label: 'Alt in guild, but user has no main set' },
+              ];
+              const byState = (state) => reconGaps.rows.filter((r) => r.link_state === state);
+              return buckets.map(({ key, label }) => {
+                const rows = byState(key);
+                if (rows.length === 0) return null;
+                return (
+                  <section key={key} className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                    <h3 style={{ marginTop: 0 }}>{label} <span style={{ color: 'var(--color-text-muted, #888)', fontWeight: 400 }}>({rows.length})</span></h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className={styles.table}>
+                        <thead>
+                          <tr>
+                            <th>Character</th>
+                            <th>Rank</th>
+                            <th>Site User</th>
+                            <th>Discord</th>
+                            <th>Officer Note</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r) => (
+                            <tr key={r.guild_member_id}>
+                              <td>{r.character_name} <span style={{ color: '#888' }}>- {r.realm_slug}</span></td>
+                              <td>{r.guild_rank_name || r.guild_rank}</td>
+                              <td>{r.site_username || <em>—</em>}</td>
+                              <td>{r.discord_username || (r.discord_id ? r.discord_id : <em>—</em>)}</td>
+                              <td style={{ maxWidth: 200, fontSize: '0.85rem' }}>{r.officer_note || ''}</td>
+                              <td>
+                                <button type="button" className="btn btn--sm btn--secondary" onClick={() => ignoreGuildMember(r.guild_member_id, 30)}>
+                                  Ignore 30d
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                );
+              });
+            })()}
+
+            {/* Category: Orphan Discord members (in Discord, no site account) */}
+            {reconOrphans.in_discord.length > 0 && (
+              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                <h3 style={{ marginTop: 0 }}>In Discord, no site account <span style={{ color: '#888', fontWeight: 400 }}>({reconOrphans.in_discord.length})</span></h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Nickname</th>
+                        <th>Display Name</th>
+                        <th>Joined</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconOrphans.in_discord.map((r) => (
+                        <tr key={r.discord_id}>
+                          <td>{r.username}</td>
+                          <td>{r.nickname || <em>—</em>}</td>
+                          <td>{r.display_name || <em>—</em>}</td>
+                          <td>{r.joined_at ? new Date(r.joined_at).toLocaleDateString() : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Category: Users who left Discord */}
+            {reconOrphans.left_discord.length > 0 && (
+              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                <h3 style={{ marginTop: 0 }}>Site users no longer in Discord <span style={{ color: '#888', fontWeight: 400 }}>({reconOrphans.left_discord.length})</span></h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Site User</th>
+                        <th>Discord</th>
+                        <th>Status</th>
+                        <th>Left At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconOrphans.left_discord.map((r) => (
+                        <tr key={r.user_id}>
+                          <td>{r.display_name || r.username}</td>
+                          <td>{r.discord_username || r.discord_id}</td>
+                          <td>{r.status}</td>
+                          <td>{r.left_at ? new Date(r.left_at).toLocaleDateString() : <em>unknown</em>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* Category: Spelling near-matches */}
+            {reconSpelling.length > 0 && (
+              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                <h3 style={{ marginTop: 0 }}>Spelling near-matches <span style={{ color: '#888', fontWeight: 400 }}>({reconSpelling.length})</span></h3>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Guild Character</th>
+                        <th>Suggested Site User</th>
+                        <th>Suggested Character</th>
+                        <th>Distance</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconSpelling.map((r) => (
+                        <tr key={r.guild_member_id}>
+                          <td>{r.guild_character} <span style={{ color: '#888' }}>- {r.realm_slug}</span></td>
+                          <td>{r.suggested_display_name || r.suggested_username}</td>
+                          <td>{r.suggested_character}</td>
+                          <td>{r.distance}</td>
+                          <td>
+                            <button type="button" className="btn btn--sm btn--primary" onClick={() => linkGuildMember(r.guild_member_id, r.suggested_user_id)}>
+                              Link
+                            </button>
+                            {' '}
+                            <button type="button" className="btn btn--sm btn--secondary" onClick={() => ignoreGuildMember(r.guild_member_id, 90)}>
+                              Ignore 90d
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {!reconLoading && reconGaps.rows.length === 0 && reconOrphans.in_discord.length === 0 && reconOrphans.left_discord.length === 0 && reconSpelling.length === 0 && (
+              <p style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>
+                No reconciliation issues detected. Everything looks aligned.
+              </p>
             )}
           </div>
         )}

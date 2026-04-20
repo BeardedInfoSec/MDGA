@@ -42,8 +42,8 @@ router.post('/sync', requireAuth, addonLimiter, async (req, res) => {
       roster, events, rosterIncluded,
     } = req.body;
 
-    // ── 1. Schema version check ──
-    if (schemaVersion !== 3) {
+    // ── 1. Schema version check (v3 and v4 accepted; v4 adds officer/public notes + lastSeen) ──
+    if (schemaVersion !== 3 && schemaVersion !== 4) {
       return res.status(400).json({ error: 'Unsupported addon schema version. Please update your addon.' });
     }
 
@@ -114,15 +114,35 @@ router.post('/sync', requireAuth, addonLimiter, async (req, res) => {
     }
 
     // ── 9. Process roster (supplementary — Blizzard API is authoritative) ──
+    // v4+: also captures officer_note, public_note, and addon_last_seen so the
+    // reconciliation dashboard can surface in-game notes that the Blizzard API
+    // never exposes.
     let rosterProcessed = 0;
     if (rosterIncluded && Array.isArray(roster)) {
       for (const member of roster.slice(0, MAX_ROSTER_SIZE)) {
         if (!member.name || !member.realmSlug) continue;
+        const officerNote = typeof member.officerNote === 'string' ? member.officerNote.substring(0, 128) : null;
+        const publicNote = typeof member.publicNote === 'string' ? member.publicNote.substring(0, 128) : null;
+        const lastSeenTs = Number(member.lastSeen);
         await pool.execute(
           `UPDATE guild_members
-           SET guild_rank_name = COALESCE(?, guild_rank_name)
+           SET guild_rank_name = COALESCE(?, guild_rank_name),
+               officer_note    = COALESCE(?, officer_note),
+               public_note     = COALESCE(?, public_note),
+               addon_last_seen = CASE
+                 WHEN ? IS NULL THEN addon_last_seen
+                 ELSE FROM_UNIXTIME(?)
+               END,
+               addon_ingested_at = NOW()
            WHERE guild_id = ? AND LOWER(character_name) = LOWER(?) AND realm_slug = ?`,
-          [member.rankName || null, guildId, member.name, member.realmSlug]
+          [
+            member.rankName || null,
+            officerNote,
+            publicNote,
+            Number.isFinite(lastSeenTs) && lastSeenTs > 0 ? lastSeenTs : null,
+            Number.isFinite(lastSeenTs) && lastSeenTs > 0 ? lastSeenTs : null,
+            guildId, member.name, member.realmSlug,
+          ]
         );
         rosterProcessed++;
       }

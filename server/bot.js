@@ -31,6 +31,12 @@ function startBot() {
 
   client.once('clientReady', () => {
     console.log(`Discord bot logged in as ${client.user.tag}`);
+    // Start the Discord member reconciliation sync now that the bot is online.
+    try {
+      require('./services/discord-member-sync').start();
+    } catch (err) {
+      console.error('[Discord member sync] Failed to start:', err.message);
+    }
   });
 
   // ================================================
@@ -449,6 +455,36 @@ async function setMemberNickname(discordId, nickname) {
 }
 
 // ================================================
+// FETCH ALL GUILD MEMBERS from the Discord server.
+// Returns an array of { discord_id, username, display_name, nickname, joined_at, roles }.
+// roles is an array of role IDs (excluding @everyone). Used by the reconciliation sync.
+// ================================================
+async function fetchAllGuildMembers() {
+  if (!client || !client.isReady()) return null;
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) return null;
+
+  const collection = await guild.members.fetch();
+  const out = [];
+  const everyoneId = guild.id;
+  collection.forEach((member) => {
+    const roles = [];
+    member.roles.cache.forEach((r) => {
+      if (r.id !== everyoneId) roles.push(r.id);
+    });
+    out.push({
+      discord_id: member.id,
+      username: member.user.username,
+      display_name: member.user.globalName || member.user.displayName || null,
+      nickname: member.nickname || null,
+      joined_at: member.joinedAt ? new Date(member.joinedAt) : null,
+      roles,
+    });
+  });
+  return out;
+}
+
+// ================================================
 // ASSIGN DISCORD ROLE to a member (for game rank → Discord sync)
 // ================================================
 async function setMemberRoles(discordId, addRoleIds, removeRoleIds) {
@@ -480,4 +516,4 @@ async function setMemberRoles(discordId, addRoleIds, removeRoleIds) {
   }
 }
 
-module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendOfficerAlert, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles };
+module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendOfficerAlert, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
