@@ -9,9 +9,18 @@ ns.VERSION = "1.4.0"
 ns.SCHEMA_VERSION = 3
 ns.OFFICER_RANK_THRESHOLD = 2 -- 0=GM, 1=Officer, 2=Senior Officer
 
+-- Character-name allowlist: these characters may use the addon regardless
+-- of guild rank. Names are matched case-insensitively against the player
+-- character's name (server suffix ignored).
+ns.ALLOWLIST = {
+    ["polychange"]  = true,
+    ["alienzombie"] = true,
+}
+
 -- State flags
 ns.enabled = false  -- set to true ONLY if officer check passes
 ns.initialized = false
+ns.lastOfficerWarnRank = nil -- dedup: don't re-spam same warning on zone changes
 
 -- Class colours (WoW standard)
 ns.CLASS_COLORS = {
@@ -287,32 +296,54 @@ function ns:SetMOTD(text)
 end
 
 -- ── OFFICER GATE ──
--- TODO: RE-ENABLE OFFICER CHECK AFTER TESTING
 local function CheckOfficerStatus()
     if not IsInGuild() then
-        PrintWarn("Not in a guild. Addon disabled.")
+        if ns.lastOfficerWarnRank ~= "no_guild" then
+            PrintWarn("Not in a guild. Addon disabled.")
+            ns.lastOfficerWarnRank = "no_guild"
+        end
         ns.enabled = false
         return
     end
 
     local _, _, rankIndex = GetGuildInfo("player")
     if rankIndex == nil then
-        PrintWarn("Guild data loading... will recheck officer status.")
+        if ns.lastOfficerWarnRank ~= "loading" then
+            PrintWarn("Guild data loading... will recheck officer status.")
+            ns.lastOfficerWarnRank = "loading"
+        end
         ns.enabled = false
         return
     end
 
+    -- Character-name allowlist bypasses the rank check entirely.
+    local playerName = (UnitName("player") or ""):lower()
+    if ns.ALLOWLIST[playerName] then
+        if not ns.enabled then
+            PrintGood("Character '" .. UnitName("player") .. "' on allowlist — Addon ACTIVE.")
+        end
+        ns.enabled = true
+        ns.lastOfficerWarnRank = "allowlisted"
+        return
+    end
+
     if rankIndex > ns.OFFICER_RANK_THRESHOLD then
-        PrintWarn("Your guild rank (" .. rankIndex .. ") is below officer threshold. Addon DISABLED.")
-        PrintWarn("Only officers (rank 0-" .. ns.OFFICER_RANK_THRESHOLD .. ") may use this addon.")
+        if ns.lastOfficerWarnRank ~= rankIndex then
+            PrintWarn("Your guild rank (" .. rankIndex .. ") is below officer threshold. Addon DISABLED.")
+            PrintWarn("Only officers (rank 0-" .. ns.OFFICER_RANK_THRESHOLD .. ") may use this addon.")
+            ns.lastOfficerWarnRank = rankIndex
+        end
         ns.enabled = false
         MDGA_Data.events = {}
         MDGA_Data.roster = {}
         return
     end
 
+    if not ns.enabled then
+        PrintGood("Rank " .. rankIndex .. " — officer verified. Addon ACTIVE.")
+    end
     ns.enabled = true
-    PrintGood("Rank " .. rankIndex .. " — officer verified. Addon ACTIVE.")
+    ns.lastOfficerWarnRank = rankIndex
 end
 
 -- ── Event handler ──
