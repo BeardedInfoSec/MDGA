@@ -4,13 +4,16 @@ Complete documentation for the MDGA guild website: installation, configuration, 
 
 ---
 
-## Recent Updates (v1.1.0)
+## Recent Updates (v1.2.0)
 
-- **Guild Verification**: Character validation now enforces guild membership in "MAKE DUROTAR GREAT AGAIN" (case-insensitive matching)
-- **Duplicate Prevention**: Prevents same character from being claimed twice (checks `user_id`, `character_name`, `realm_slug` uniqueness)
-- **Realm Slug Fix**: Fixed character lookup to use `profile.realm.slug` directly instead of regex parsing from API href
-- **Guild & Faction Storage**: Added `guild_name` and `faction` columns to `user_characters` table (migration-027)
-- **Security Hardening**: Strengthened Blizzard API integration with improved error handling and guild validation
+- **Guild ↔ Discord Reconciliation**: New admin tab cross-references in-game guild roster against Discord membership. Officers can link mismatched rows to site users, mark rows as "ignored", and paste addon JSON to backfill officer/public notes when the live `/api/addon/sync` endpoint isn't wired up. Backed by `server/routes/reconciliation.js` and `db/migration-041-reconciliation.sql`.
+- **Roster Note Column**: Officer Note column now displayed on the guild roster view. Notes come from the WoW addon (officer/public notes captured client-side and shipped via sync or paste).
+- **Generate Report Countdown**: Member Activity / Guild Gaps report builders now show a robust countdown while the server collates results (replaces the previous spinner-only state).
+- **Addon Schema v4**: Server now accepts both schema v3 and v4. v4 adds `officerNote`, `publicNote`, and `lastSeen` per roster entry.
+- **Addon Allowlist**: Specific characters can be whitelisted (`ns.ALLOWLIST` in `wow_addon/MDGA/Core.lua`) to use the addon regardless of in-game rank — useful for testing and for officers whose main is on an alt account.
+- **Officer-check de-duplication**: Addon no longer re-spams the "not an officer" warning on every zone change (tracks `ns.lastOfficerWarnRank`).
+- **Roster CSV filename**: Guild roster CSV exports now include guild name + timestamp for easier archival.
+- **Guild Verification**: Character validation enforces guild membership in "MAKE DUROTAR GREAT AGAIN" (case-insensitive matching). Duplicate character claims are blocked via a unique `(user_id, character_name, realm_slug)` constraint.
 
 ---
 
@@ -354,6 +357,7 @@ MDGA/
 │   │   ├── carousel.js       # Carousel images + site settings
 │   │   ├── upload.js         # Image upload endpoint
 │   │   ├── reports.js        # Admin reports + analytics
+│   │   ├── reconciliation.js # Guild ↔ Discord reconciliation + addon paste ingest
 │   │   └── addon.js          # WoW addon sync endpoint
 │   └── services/
 │       ├── character-sync.js # Character stat refresh scheduler
@@ -844,7 +848,18 @@ Accessible at `/admin` for officers and users with `admin.view_panel` permission
 
 - **Member Activity Report** — Search and filter users by rank, status, date range, activity period. Export results.
 - **Guild Gaps Report** — Compare Discord members vs. site accounts. Identify: needs Discord link, no site account, Discord not active, etc.
+- **Generate Report** — Long-running reports show a live countdown timer while collating server-side; results stream into the table when ready.
 - **Saved Presets** — Save and load report filter configurations
+
+### Tab: Reconciliation
+
+- Cross-references the in-game guild roster (from Blizzard + addon) against Discord membership and site accounts
+- Each row flags its state: linked, needs link, no site account, Discord-only, etc.
+- **Link** — Manually link a guild member row to an existing site user
+- **Ignore** / **Un-ignore** — Mark a row as intentionally unlinked (alt characters, etc.)
+- **Refresh** — Re-runs `discord-member-sync` + `guild-sync` services
+- **Paste Addon JSON** — Officers can paste the addon's "Export JSON" output to backfill officer notes, public notes, and `lastSeen` timestamps onto guild_members rows
+- **Officer Note column** — Surfaces notes captured client-side by the addon
 
 ### Tab: Roles (Guild Master Only)
 
@@ -939,11 +954,19 @@ The project includes a companion WoW addon that sends real-time guild data to th
 
 ### Validation
 
-- Schema version 3 required
+- Schema version 3 or 4 accepted (v4 adds `officerNote`, `publicNote`, `lastSeen` per roster entry)
 - Guild name must match (case-insensitive)
 - Data must be fresh (30min for capture, 2h for events)
 - Character ownership verified
 - Max 100 events and 1000 roster entries per sync
+
+### Officer Gate & Allowlist
+
+The addon only activates if the player is an officer (in-game guild rank ≤ `OFFICER_RANK_THRESHOLD`, default 2). Specific characters can be allowlisted to bypass the rank check via `ns.ALLOWLIST` in `wow_addon/MDGA/Core.lua` — matched case-insensitively against the player name (server suffix ignored). The "not an officer" warning is de-duplicated per rank to avoid spam on zone changes.
+
+### Paste-Based Ingest (Fallback)
+
+For officers without the sync endpoint wired up, the addon exposes an "Export JSON" button. Officers can paste the output into **Admin > Reconciliation** to backfill officer/public notes and `lastSeen` onto `guild_members`. Server endpoint: `POST /api/reconciliation/addon-paste` (deduplicated by SHA-256 of the payload).
 
 ---
 
@@ -1025,7 +1048,7 @@ Discord OAuth uses random state tokens with 10-minute TTL, stored server-side an
 
 ### Schema
 
-All migrations are in `db/` (schema.sql + migration-001 through migration-040). Run automatically by `setup.sh`.
+All migrations are in `db/` (schema.sql + migration-001 through migration-041). Run automatically by `setup.sh`.
 
 ### Core Tables
 
@@ -1060,6 +1083,8 @@ All migrations are in `db/` (schema.sql + migration-001 through migration-040). 
 | `addon_events` | Real-time guild events from WoW addon |
 | `game_rank_mappings` | In-game guild rank → site rank mapping |
 | `user_report_presets` | Saved admin report filter configurations |
+| `discord_members` | Cached Discord guild member list for reconciliation against the in-game roster |
+| `addon_ingests` | SHA-256 ledger of addon JSON pastes (deduplicates re-submissions) |
 
 ### Running Migrations Manually
 
@@ -1233,7 +1258,17 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|:----:|-------------|
-| POST | `/api/addon/sync` | JWT + Officer | Sync WoW addon data |
+| POST | `/api/addon/sync` | JWT + Officer | Sync WoW addon data (schema v3 or v4) |
+
+### Reconciliation
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|:----:|-------------|
+| POST | `/api/reconciliation/addon-paste` | JWT + Officer | Paste-based addon JSON ingest (backfill officer/public notes + lastSeen) |
+| POST | `/api/reconciliation/refresh` | JWT + Officer | Re-run Discord member sync + guild roster sync |
+| POST | `/api/reconciliation/guild-members/:id/link` | JWT + Officer | Manually link a guild row to a site user |
+| POST | `/api/reconciliation/guild-members/:id/ignore` | JWT + Officer | Mark guild row as intentionally unlinked |
+| DELETE | `/api/reconciliation/guild-members/:id/ignore` | JWT + Officer | Clear the ignore flag |
 
 ---
 
