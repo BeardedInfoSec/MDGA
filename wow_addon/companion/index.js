@@ -14,28 +14,34 @@ const crypto = require('crypto');
 const chokidar = require('chokidar');
 const fetch = require('node-fetch');
 const { parseLuaFile } = require('./lua-parser');
+const { runWizard } = require('./setup');
 
-// ── Load config ──
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-if (!fs.existsSync(CONFIG_PATH)) {
-  console.error('[MDGA] config.json not found. Copy config.example.json to config.json and fill in your settings.');
-  process.exit(1);
-}
-const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+// When packaged with pkg, __dirname points inside the snapshot (read-only).
+// Use the directory of the running exe so config.json sits next to it.
+const APP_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const CONFIG_PATH = path.join(APP_DIR, 'config.json');
+const FORCE_SETUP = process.argv.includes('--setup') || process.argv.includes('--reconfigure');
 
-if (!config.serverUrl || !config.token || !config.wowPath || !config.accountName) {
-  console.error('[MDGA] config.json is incomplete. Required: serverUrl, token, wowPath, accountName');
-  process.exit(1);
+async function loadOrCreateConfig() {
+  if (FORCE_SETUP || !fs.existsSync(CONFIG_PATH)) {
+    return await runWizard(CONFIG_PATH);
+  }
+  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  if (!cfg.serverUrl || !cfg.token || !cfg.wowPath || !cfg.accountName) {
+    console.log('[MDGA] config.json is incomplete — running setup wizard.');
+    return await runWizard(CONFIG_PATH);
+  }
+  return cfg;
 }
+
+// Config + watch path are populated by main() after the wizard runs.
+let config;
+let SAVED_VARS_PATH;
 
 // ── Constants ──
 const OFFICER_RANK_THRESHOLD = 2;
-const SAVED_VARS_PATH = path.join(
-  config.wowPath, 'WTF', 'Account', config.accountName,
-  'SavedVariables', 'MDGA.lua'
-);
-const STATE_FILE = path.join(__dirname, 'companion-state.json');
-const QUEUE_FILE = path.join(__dirname, 'companion-queue.json');
+const STATE_FILE = path.join(APP_DIR, 'companion-state.json');
+const QUEUE_FILE = path.join(APP_DIR, 'companion-queue.json');
 const MAX_RETRY_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 const BASE_RETRY_DELAY_MS = 5000;
 
@@ -319,33 +325,53 @@ async function drainQueue() {
 }
 
 // ── Main ──
-console.log(`[MDGA] Companion app v1.0.0`);
-console.log(`[MDGA] Watching: ${SAVED_VARS_PATH}`);
-console.log(`[MDGA] Server: ${config.serverUrl}`);
+async function main() {
+  config = await loadOrCreateConfig();
+  SAVED_VARS_PATH = path.join(
+    config.wowPath, 'WTF', 'Account', config.accountName,
+    'SavedVariables', 'MDGA.lua'
+  );
 
-// Watch the SavedVariables file
-const watcher = chokidar.watch(SAVED_VARS_PATH, {
-  persistent: true,
-  awaitWriteFinish: {
-    stabilityThreshold: 2000, // wait 2s after last write
-    pollInterval: 500,
-  },
-  ignoreInitial: false,
+  console.log(`[MDGA] Companion app v1.5.0`);
+  console.log(`[MDGA] Watching: ${SAVED_VARS_PATH}`);
+  console.log(`[MDGA] Server: ${config.serverUrl}`);
+
+  const watcher = chokidar.watch(SAVED_VARS_PATH, {
+    persistent: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 2000, // wait 2s after last write
+      pollInterval: 500,
+    },
+    ignoreInitial: false,
+  });
+
+  watcher.on('add', () => {
+    console.log('[MDGA] SavedVariables file detected.');
+    processFile();
+  });
+
+  watcher.on('change', () => {
+    console.log('[MDGA] SavedVariables changed, syncing...');
+    processFile();
+  });
+
+  watcher.on('error', (err) => {
+    console.error('[MDGA] Watcher error:', err.message);
+  });
+
+  // Run initial sync after 2 seconds
+  setTimeout(processFile, 2000);
+}
+
+main().catch((err) => {
+  console.error('[MDGA] Fatal:', err);
+  // When run by double-click, the user expects to see the error before the
+  // window closes. Pause for a keystroke.
+  if (process.stdin.isTTY) {
+    console.log('\nPress Enter to close.');
+    process.stdin.resume();
+    process.stdin.once('data', () => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
-
-watcher.on('add', () => {
-  console.log('[MDGA] SavedVariables file detected.');
-  processFile();
-});
-
-watcher.on('change', () => {
-  console.log('[MDGA] SavedVariables changed, syncing...');
-  processFile();
-});
-
-watcher.on('error', (err) => {
-  console.error('[MDGA] Watcher error:', err.message);
-});
-
-// Run initial sync after 2 seconds
-setTimeout(processFile, 2000);

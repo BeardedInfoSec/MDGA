@@ -958,7 +958,7 @@ y = y - 22
 local filterInfo = whisperTab:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 filterInfo:SetPoint("TOPLEFT", whisperTab, "TOPLEFT", 10, y)
 filterInfo:SetWidth(WHISPER_INNER_W); filterInfo:SetJustifyH("LEFT")
-filterInfo:SetText("Leave blank to whisper all online guild members.\nType rank numbers separated by commas (e.g., 0,1,2).")
+filterInfo:SetText("Leave the rank dropdown empty to whisper every online guild member, or pick one or more ranks.")
 filterInfo:SetTextColor(C_DIM.r, C_DIM.g, C_DIM.b)
 y = y - 30
 
@@ -966,10 +966,70 @@ local rankFilterLabel = whisperTab:CreateFontString(nil, "OVERLAY", "GameFontNor
 rankFilterLabel:SetPoint("TOPLEFT", whisperTab, "TOPLEFT", 10, y)
 rankFilterLabel:SetText("Ranks:"); rankFilterLabel:SetTextColor(C_GREY.r, C_GREY.g, C_GREY.b)
 
-local rankFilterBox = CreateFrame("EditBox", "MDGAWhisperRankFilter", whisperTab, "InputBoxTemplate")
-rankFilterBox:SetPoint("LEFT", rankFilterLabel, "RIGHT", 10, 0)
-rankFilterBox:SetSize(120, 20); rankFilterBox:SetAutoFocus(false)
-rankFilterBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+-- Multi-select rank dropdown. Replaces the older comma-separated EditBox so
+-- officers don't have to memorize rank index numbers. Selected ranks live in
+-- `selectedRanks[index] = true` and are re-read by ParseRankFilter().
+local selectedRanks = {}
+
+local rankDropdown = CreateFrame("Frame", "MDGAWhisperRankDropdown", whisperTab, "UIDropDownMenuTemplate")
+rankDropdown:SetPoint("LEFT", rankFilterLabel, "RIGHT", -6, -2)
+UIDropDownMenu_SetWidth(rankDropdown, 180)
+UIDropDownMenu_SetText(rankDropdown, "All ranks")
+
+local function UpdateRankDropdownText()
+    local rankNames = (MDGA_Data and MDGA_Data.guildInfo and MDGA_Data.guildInfo.rankNames) or {}
+    local count, firstIdx = 0, nil
+    for k, v in pairs(selectedRanks) do
+        if v then
+            count = count + 1
+            if firstIdx == nil then firstIdx = k end
+        end
+    end
+    if count == 0 then
+        UIDropDownMenu_SetText(rankDropdown, "All ranks")
+    elseif count == 1 then
+        UIDropDownMenu_SetText(rankDropdown, rankNames[firstIdx] or ("Rank " .. firstIdx))
+    else
+        UIDropDownMenu_SetText(rankDropdown, count .. " ranks selected")
+    end
+end
+
+UIDropDownMenu_Initialize(rankDropdown, function(self, level)
+    local rankNames = (MDGA_Data and MDGA_Data.guildInfo and MDGA_Data.guildInfo.rankNames) or {}
+    local numRanks  = (MDGA_Data and MDGA_Data.guildInfo and MDGA_Data.guildInfo.numRanks) or 0
+
+    -- Fallback: if numRanks is 0 (addon hasn't scanned yet), populate from
+    -- whatever rank names we do have so the dropdown isn't empty on first open.
+    if numRanks == 0 then
+        local maxKey = -1
+        for k in pairs(rankNames) do if k > maxKey then maxKey = k end end
+        numRanks = maxKey + 1
+    end
+
+    local clearInfo = UIDropDownMenu_CreateInfo()
+    clearInfo.text = "All ranks (clear selection)"
+    clearInfo.notCheckable = true
+    clearInfo.func = function()
+        wipe(selectedRanks)
+        UpdateRankDropdownText()
+        CloseDropDownMenus()
+    end
+    UIDropDownMenu_AddButton(clearInfo, level)
+
+    for i = 0, numRanks - 1 do
+        local info = UIDropDownMenu_CreateInfo()
+        info.text             = (rankNames[i] or ("Rank " .. i)) .. " (" .. i .. ")"
+        info.checked          = selectedRanks[i] or false
+        info.keepShownOnClick = true
+        info.isNotRadio       = true
+        info.func = function(_, _, _, checked)
+            selectedRanks[i] = checked or nil
+            UpdateRankDropdownText()
+        end
+        UIDropDownMenu_AddButton(info, level)
+    end
+end, "MENU")
+
 y = y - 30
 
 local previewLabel = whisperTab:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -1010,10 +1070,10 @@ previewBtn:SetSize(100, 26); previewBtn:SetPoint("LEFT", stopBtn, "RIGHT", 10, 0
 previewBtn:SetText("Preview")
 
 local function ParseRankFilter()
-    local text = rankFilterBox:GetText():trim()
-    if text == "" then return {} end
     local ranks = {}
-    for num in text:gmatch("(%d+)") do table.insert(ranks, tonumber(num)) end
+    for k, v in pairs(selectedRanks) do
+        if v then table.insert(ranks, k) end
+    end
     return ranks
 end
 
@@ -1701,8 +1761,22 @@ exportJsonBtn:SetScript("OnClick", function()
 end)
 
 -- Generate Report → stages the full roster into MDGA_Data.pendingReport,
--- warns with a countdown, then /reload so SavedVariables flush to disk.
--- The companion app watches the file and writes a CSV to the user's Desktop.
+-- then prompts the user via StaticPopup. Clicking the popup's Reload button
+-- is a hardware input event, so ReloadUI() runs from a clean (untainted)
+-- call stack — the previous timer-based auto-reload kept hitting "Interface
+-- action failed because of an addon" because any addon hooked into
+-- C_Timer could taint the deferred ReloadUI call.
+StaticPopupDialogs["MDGA_REPORT_RELOAD"] = {
+    text = "MDGA roster captured (%d members staged).\n\nClick Reload to flush SavedVariables — the companion app will then write the CSV to your Desktop.",
+    button1 = "Reload",
+    button2 = "Later",
+    OnAccept = function() ReloadUI() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 local genReportBtn = CreateFrame("Button", nil, toolsContent, "UIPanelButtonTemplate")
 genReportBtn:SetSize(180, 22)
 genReportBtn:SetPoint("LEFT", exportJsonBtn, "RIGHT", 8, 0)
@@ -1738,39 +1812,8 @@ genReportBtn:SetScript("OnClick", function()
         roster      = rosterList,
     }
 
-    -- Self-owned countdown overlay (avoids touching Blizzard's RaidWarningFrame,
-    -- which can taint secure calls and surface as "Interface action failed
-    -- because of an addon" when ReloadUI fires).
-    if not ns.reportCountdownFrame then
-        local f = CreateFrame("Frame", "MDGAReportCountdown", UIParent)
-        f:SetSize(420, 60)
-        f:SetPoint("TOP", UIParent, "TOP", 0, -160)
-        f:SetFrameStrata("FULLSCREEN_DIALOG")
-        f.bg = f:CreateTexture(nil, "BACKGROUND")
-        f.bg:SetAllPoints()
-        f.bg:SetColorTexture(0, 0, 0, 0.75)
-        f.text = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        f.text:SetPoint("CENTER")
-        f.text:SetTextColor(1, 0.6, 0.1)
-        f:Hide()
-        ns.reportCountdownFrame = f
-    end
-    local overlay = ns.reportCountdownFrame
-    overlay:Show()
-    print("|cffff9900[MDGA]|r Generating roster report — UI will reload in 5 seconds.")
-
-    local countdown = 5
-    local function tick()
-        if countdown <= 0 then
-            overlay:Hide()
-            C_Timer.After(0, function() ReloadUI() end)
-            return
-        end
-        overlay.text:SetText("[MDGA] Generating report — reloading in " .. countdown .. "s")
-        countdown = countdown - 1
-        C_Timer.After(1, tick)
-    end
-    tick()
+    print(string.format("|cffff9900[MDGA]|r Roster staged (%d members). Click Reload in the popup to write the CSV.", #rosterList))
+    StaticPopup_Show("MDGA_REPORT_RELOAD", #rosterList)
 end)
 y = y - 36
 

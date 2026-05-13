@@ -171,6 +171,40 @@ router.post('/logout', requireAuth, (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
+// POST /api/auth/companion-token
+// Issues a long-lived JWT (90 days) for the MDGA Audit Tool / companion app to
+// hit officer-only endpoints. Officer-only — same trust level as the website
+// session, but rotatable by re-issuing.
+router.post('/companion-token', requireAuth, async (req, res) => {
+  try {
+    if (!['officer', 'guildmaster'].includes(req.user.rank)) {
+      return res.status(403).json({ error: 'Officer rank required' });
+    }
+    const jwt = require('jsonwebtoken');
+    const { loadUserPermissions } = require('../middleware/auth');
+    const permissions = await loadUserPermissions(req.user.id);
+    const token = jwt.sign(
+      {
+        id: req.user.id,
+        username: req.user.username,
+        rank: req.user.rank,
+        permissions,
+        purpose: 'companion',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '90d' }
+    );
+    res.json({
+      token,
+      expiresInDays: 90,
+      issuedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Companion token error:', err);
+    res.status(500).json({ error: 'Failed to issue token' });
+  }
+});
+
 // GET /api/auth/me
 router.get('/me', requireAuth, (req, res) => {
   res.json({

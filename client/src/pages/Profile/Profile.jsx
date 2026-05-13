@@ -58,6 +58,45 @@ export default function Profile() {
   const [overlaySearching, setOverlaySearching] = useState(false);
   const [overlaySaving, setOverlaySaving] = useState(false);
   const [allowedRealms, setAllowedRealms] = useState([]);
+  const [companionToken, setCompanionToken] = useState('');
+  const [companionIssuedAt, setCompanionIssuedAt] = useState('');
+  const [companionGenerating, setCompanionGenerating] = useState(false);
+  const [companionError, setCompanionError] = useState('');
+  const [companionCopied, setCompanionCopied] = useState(false);
+
+  const isOfficerSelf = isOwnProfile && ['officer', 'guildmaster'].includes(user?.rank);
+
+  const handleGenerateCompanionToken = async () => {
+    setCompanionGenerating(true);
+    setCompanionError('');
+    setCompanionCopied(false);
+    try {
+      const res = await apiFetch('/auth/companion-token', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCompanionError(data.error || `Request failed (${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      setCompanionToken(data.token);
+      setCompanionIssuedAt(data.issuedAt);
+    } catch (err) {
+      setCompanionError(err.message || 'Request failed');
+    } finally {
+      setCompanionGenerating(false);
+    }
+  };
+
+  const handleCopyCompanionToken = async () => {
+    if (!companionToken) return;
+    try {
+      await navigator.clipboard.writeText(companionToken);
+      setCompanionCopied(true);
+      setTimeout(() => setCompanionCopied(false), 2000);
+    } catch (err) {
+      setCompanionError('Couldn’t copy — select the token manually and Ctrl+C.');
+    }
+  };
 
   useEffect(() => {
     fetch('/api/config/realms')
@@ -634,6 +673,66 @@ export default function Profile() {
           )}
         </div>
       </section>
+
+      {isOfficerSelf && (
+        <section className="section section--dark">
+          <div className="container">
+            <div className={styles.sectionHead}>
+              <div>
+                <h2 className={styles.sectionHeadTitle}>MDGA Audit Tool</h2>
+                <p className={styles.sectionHeadDesc}>
+                  Generate a 90-day token for the desktop audit tool (mdga-audit.exe). Paste it
+                  when the tool prompts. Treat the token like a password.
+                </p>
+              </div>
+              <div className={styles.sectionHeadActions}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleGenerateCompanionToken}
+                  disabled={companionGenerating}
+                >
+                  {companionGenerating ? 'Generating…' : (companionToken ? 'Regenerate Token' : 'Generate Token')}
+                </button>
+              </div>
+            </div>
+
+            {companionError && (
+              <p style={{ color: '#ff6b6b', marginTop: '0.5rem' }}>{companionError}</p>
+            )}
+
+            {companionToken && (
+              <div style={{ marginTop: '1rem' }}>
+                <textarea
+                  readOnly
+                  value={companionToken}
+                  onFocus={(e) => e.target.select()}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    padding: '0.5rem',
+                    background: '#1a1a1a',
+                    color: '#eee',
+                    border: '1px solid #444',
+                    borderRadius: '4px',
+                    wordBreak: 'break-all',
+                  }}
+                />
+                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button type="button" className="btn btn-secondary" onClick={handleCopyCompanionToken}>
+                    {companionCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                  <span style={{ color: '#888', fontSize: '0.85rem' }}>
+                    Issued {companionIssuedAt ? new Date(companionIssuedAt).toLocaleString() : ''} · expires in 90 days
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {overlayOpen && (
         <div className={styles.overlay}>
