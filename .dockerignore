@@ -1,0 +1,42 @@
+# Node
+**/node_modules
+**/npm-debug.log
+**/yarn-error.log
+
+# Build artifacts (Dockerfile rebuilds these)
+client/dist
+client/.vite
+.next
+dist
+build
+
+# Tooling
+tools/mdga-audit/build
+tools/mdga-audit/__pycache__
+tools/mdga-audit/dist/mdga-audit.exe
+tools/mdga-audit/discord-reports
+tools/mdga-audit/archive
+tools/mdga-audit/test_output.xlsx
+tools/mdga-audit/MDGA_audit_*
+
+# Local env (use docker-compose env vars or a .env passed in explicitly)
+.env
+.env.*
+!.env.example
+
+# Git / IDE / OS noise
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Logs and runtime data
+logs
+uploads/*
+!uploads/.gitkeep
+
+# Documentation that doesn't need to be in the image
+*.pdf
+README*.pdf
