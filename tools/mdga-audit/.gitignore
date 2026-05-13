@@ -1,0 +1,19 @@
+# PyInstaller build artifacts (the .exe in dist/ is shipped, the rest is local)
+build/
+*.spec
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Test harness output (regenerated every run)
+test_output.xlsx
+
+# User-specific runtime files (created by the exe at run time)
+mdga-audit-config.json
+discord-reports/
+archive/
+
+# Stray audit outputs from older versions that wrote next to the exe
+MDGA_audit_*.csv
+MDGA_audit_*.xlsx
