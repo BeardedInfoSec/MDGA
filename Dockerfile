@@ -19,7 +19,7 @@ WORKDIR /app
 COPY package*.json ./
 # sharp + bcrypt may need build tools on alpine
 RUN apk add --no-cache python3 make g++ \
- && npm ci --omit=dev --production \
+ && npm ci --omit=dev \
  && apk del python3 make g++
 
 # ── Stage 3: runtime ──
