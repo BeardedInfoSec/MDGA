@@ -7,6 +7,7 @@ const {
   fetchMythicKeystoneProfile,
   fetchRaidProgression,
 } = require('../blizzard');
+const guildRegistry = require('./guild-registry');
 
 async function resolveOrNull(promiseFactory, label, char) {
   try {
@@ -58,11 +59,16 @@ async function refreshCharacter(char, options = {}) {
   ]);
 
   if (profile) {
+    // Re-resolve guild_id every refresh — picks up guild changes / realm transfers.
+    const matchedGuild = await guildRegistry.findGuild({
+      guildName: profile.guild_name,
+      realmSlug: profile.realm_slug || char.realm_slug,
+    });
     await pool.execute(
       `UPDATE user_characters SET
         level = ?, race = ?, class = COALESCE(?, class), spec = COALESCE(?, spec),
         item_level = ?, media_url = ?, guild_name = COALESCE(?, guild_name),
-        faction = COALESCE(?, faction), last_login = ?
+        faction = COALESCE(?, faction), guild_id = ?, last_login = ?
       WHERE id = ?`,
       [
         profile.level,
@@ -73,6 +79,7 @@ async function refreshCharacter(char, options = {}) {
         profile.media_url,
         profile.guild_name,
         profile.faction,
+        matchedGuild ? matchedGuild.id : null,
         profile.last_login,
         char.id,
       ]

@@ -9,11 +9,11 @@ const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { sendOfficerAlert } = require('../bot');
 const { processRankChanges } = require('../services/guild-sync');
+const guildRegistry = require('../services/guild-registry');
 
 const router = express.Router();
 
 // ── Constants ──
-const REQUIRED_GUILD_NAME = 'MAKE DUROTAR GREAT AGAIN';
 const OFFICER_RANK_THRESHOLD = 2;       // guild_rank <= 2 (0=GM, 1=Officer, 2=Senior Officer)
 const MAX_EVENTS_PER_BATCH = 100;
 const MAX_ROSTER_SIZE = 1000;
@@ -48,8 +48,10 @@ router.post('/sync', requireAuth, addonLimiter, async (req, res) => {
     }
 
     // ── 2. Guild name verification ──
-    if (!guildInfo?.name || guildInfo.name.toUpperCase().trim() !== REQUIRED_GUILD_NAME) {
-      return res.status(403).json({ error: 'This endpoint is only for MDGA guild members.' });
+    // Resolved later (step 6) once we know playerInfo.realmSlug — the
+    // (guildInfo.name, realm) pair must match a registered child guild.
+    if (!guildInfo?.name) {
+      return res.status(400).json({ error: 'Missing guildInfo.name.' });
     }
 
     // ── 3. Capture freshness check ──
@@ -74,12 +76,19 @@ router.post('/sync', requireAuth, addonLimiter, async (req, res) => {
       return res.status(403).json({ error: 'Character not linked to your account.' });
     }
 
-    // ── 6. Guild membership + OFFICER CHECK (authoritative from DB) ──
-    const [guildRows] = await pool.execute('SELECT id FROM guilds WHERE is_primary = TRUE LIMIT 1');
-    if (guildRows.length === 0) {
-      return res.status(500).json({ error: 'No primary guild configured.' });
+    // ── 6. Guild resolution + OFFICER CHECK (authoritative from DB) ──
+    // The (guildInfo.name, playerInfo.realmSlug) pair must match a registered
+    // child guild. Officers from any federation guild can sync their roster.
+    const matchedGuild = await guildRegistry.findGuild({
+      guildName: guildInfo.name,
+      realmSlug: playerInfo.realmSlug,
+    });
+    if (!matchedGuild) {
+      return res.status(403).json({
+        error: 'This endpoint is only for officers of guilds in our federation.',
+      });
     }
-    const guildId = guildRows[0].id;
+    const guildId = matchedGuild.id;
 
     const [memberRows] = await pool.execute(
       `SELECT guild_rank FROM guild_members

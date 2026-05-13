@@ -1,8 +1,8 @@
 const pool = require('../db');
 const { fetchCharacterProfile } = require('../blizzard');
 const { refreshCharacter } = require('./character-sync');
+const guildRegistry = require('./guild-registry');
 
-const REQUIRED_GUILD_NAME = 'MAKE DUROTAR GREAT AGAIN';
 const CYCLE_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
 const INITIAL_DELAY = 3 * 60 * 1000;        // 3 min after boot
 
@@ -21,11 +21,17 @@ async function processCharacter(char) {
     return { action: 'error', name: char.character_name };
   }
 
-  // If profile came back but guild doesn't match, remove the character
-  const charGuild = (profile?.guild_name || '').toUpperCase().trim();
-  if (!profile || charGuild !== REQUIRED_GUILD_NAME) {
+  // If profile came back but the (guild_name, realm_slug) doesn't match any
+  // registered child guild in the federation, remove the character.
+  const matchedGuild = profile
+    ? await guildRegistry.findGuild({
+        guildName: profile.guild_name,
+        realmSlug: profile.realm_slug || char.realm_slug,
+      })
+    : null;
+  if (!profile || !matchedGuild) {
     const reason = profile
-      ? `guild is "${profile.guild_name || 'none'}"`
+      ? `guild is "${profile.guild_name || 'none'}" on "${profile.realm_slug || char.realm_slug}" — not in federation`
       : 'profile not found';
 
     // Delete pvp_stats first (FK), then the character

@@ -3,6 +3,7 @@ const pool = require('../db');
 const { requireAuth, requireOfficer, requirePermission } = require('../middleware/auth');
 const { syncGuild, syncAllGuilds } = require('../services/guild-sync');
 const { sendOfficerAlert } = require('../bot');
+const guildRegistry = require('../services/guild-registry');
 
 const router = express.Router();
 
@@ -248,6 +249,7 @@ router.post('/guilds', requireAuth, requirePermission('guild.manage'), async (re
        ON DUPLICATE KEY UPDATE is_primary = VALUES(is_primary)`,
       [displayName, realmSlug.toLowerCase(), nameSlug.toLowerCase(), isPrimary ? 1 : 0]
     );
+    guildRegistry.invalidate();
 
     res.json({ message: 'Guild added. Run a sync to populate data.' });
   } catch (err) {
@@ -260,6 +262,7 @@ router.post('/guilds', requireAuth, requirePermission('guild.manage'), async (re
 router.delete('/guilds/:id', requireAuth, requirePermission('guild.manage'), async (req, res) => {
   try {
     await pool.execute('DELETE FROM guilds WHERE id = ?', [req.params.id]);
+    guildRegistry.invalidate();
     res.json({ message: 'Guild removed' });
   } catch (err) {
     console.error('Delete guild error:', err);
