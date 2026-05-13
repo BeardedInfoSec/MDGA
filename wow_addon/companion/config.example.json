@@ -1,8 +1,0 @@
-{
-  "serverUrl": "https://mdga.gg",
-  "token": "PASTE_JWT_FROM_https://mdga.gg/profile_HERE",
-  "wowPath": "C:/Program Files (x86)/World of Warcraft/_retail_",
-  "accountName": "REPLACE_WITH_FOLDER_NAME_FROM_WTF_Account",
-  "pollIntervalMs": 5000,
-  "debug": false
-}

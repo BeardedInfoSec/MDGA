@@ -1725,7 +1725,8 @@ end)
 
 -- Export the roster as JSON for the website Reconciliation tab's paste-ingest.
 -- Includes officer/public notes and lastSeen so they reach the reconciliation
--- dashboard without the companion app.
+-- dashboard via manual paste (the live sync companion has been deprecated;
+-- MDGA Audit Tool reads SavedVariables directly).
 local exportJsonBtn = CreateFrame("Button", nil, toolsContent, "UIPanelButtonTemplate")
 exportJsonBtn:SetSize(130, 22)
 exportJsonBtn:SetPoint("LEFT", exportEventsBtn, "RIGHT", 8, 0)
@@ -1767,7 +1768,7 @@ end)
 -- action failed because of an addon" because any addon hooked into
 -- C_Timer could taint the deferred ReloadUI call.
 StaticPopupDialogs["MDGA_REPORT_RELOAD"] = {
-    text = "MDGA roster captured (%d members staged).\n\nClick Reload to flush SavedVariables — the companion app will then write the CSV to your Desktop.",
+    text = "MDGA roster captured (%d members staged).\n\nClick Reload to flush SavedVariables — the MDGA Audit Tool (running outside WoW) will then pick up the roster.",
     button1 = "Reload",
     button2 = "Later",
     OnAccept = function() ReloadUI() end,

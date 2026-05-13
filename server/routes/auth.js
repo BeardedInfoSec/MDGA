@@ -173,16 +173,18 @@ router.post('/logout', requireAuth, (req, res) => {
 
 // POST /api/auth/companion-token
 // Issues a long-lived JWT (90 days) for the MDGA Audit Tool / companion app to
-// hit officer-only endpoints. Officer-only — same trust level as the website
-// session, but rotatable by re-issuing.
+// hit officer-only endpoints. Restricted to Guildmaster rank or anyone with the
+// `admin.view_panel` permission — i.e. the website's "admin role" tier. Officers
+// without admin perms cannot mint long-lived tokens.
 router.post('/companion-token', requireAuth, async (req, res) => {
   try {
-    if (!['officer', 'guildmaster'].includes(req.user.rank)) {
-      return res.status(403).json({ error: 'Officer rank required' });
-    }
-    const jwt = require('jsonwebtoken');
     const { loadUserPermissions } = require('../middleware/auth');
     const permissions = await loadUserPermissions(req.user.id);
+    const isAdmin = permissions.includes('admin.view_panel');
+    if (req.user.rank !== 'guildmaster' && !isAdmin) {
+      return res.status(403).json({ error: 'Guildmaster or admin access required' });
+    }
+    const jwt = require('jsonwebtoken');
     const token = jwt.sign(
       {
         id: req.user.id,

@@ -43,12 +43,29 @@ async function syncGuild(guild) {
     updated = true;
   }
 
-  // 2) Upsert roster members (with rank change detection)
-  // Guard: if Blizzard API returns a suspiciously small roster, skip to prevent accidental mass deletion
-  if (roster && roster.length > 0 && roster.length < 10) {
-    console.warn(`[Guild sync] ${guild.name_slug}: roster has only ${roster.length} members — skipping to prevent accidental deletion. Manual sync required.`);
+  // 2) Upsert roster members (with rank change detection).
+  // Guard against catastrophic API glitches that wipe established rosters.
+  // Skip the upsert+delete path ONLY when an established guild (>20 members
+  // already on file) suddenly drops below 25% of its previous size. This lets
+  // legitimately small federation guilds (a few members each) seed correctly
+  // while still protecting a 800-member roster from being nuked by a bad API
+  // response. Empty rosters (length=0) are always skipped.
+  let acceptRoster = false;
+  if (roster && roster.length > 0) {
+    const [[{ existing_count }]] = await pool.query(
+      'SELECT COUNT(*) AS existing_count FROM guild_members WHERE guild_id = ?',
+      [guild.id]
+    );
+    const isCatastrophicDrop = existing_count > 20 && roster.length < existing_count * 0.25;
+    if (isCatastrophicDrop) {
+      console.warn(
+        `[Guild sync] ${guild.name_slug}: roster shrunk from ${existing_count} to ${roster.length} (>75% drop) — skipping to prevent mass deletion. Investigate manually.`
+      );
+    } else {
+      acceptRoster = true;
+    }
   }
-  if (roster && roster.length >= 10) {
+  if (acceptRoster) {
     const rankChanges = [];
 
     for (const member of roster) {

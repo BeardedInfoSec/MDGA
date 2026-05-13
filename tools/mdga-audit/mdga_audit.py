@@ -29,11 +29,84 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-VERSION = "1.2.0"
+# Bundled into the .exe via PyInstaller. Tested with openpyxl 3.1.x.
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
+
+VERSION = "1.4.0"
 DEFAULT_SERVER = "https://mdga.gg"
 
+# Config file lives next to the exe (or the .py during dev). Stores WoW path,
+# account, server URL, token, and Discord-CSV folder so subsequent runs can
+# skip every prompt by pressing Enter. Pass --reconfigure to rerun the wizard.
+def _app_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(_app_dir(), "mdga-audit-config.json")
+DISCORD_INPUT_DIR = os.path.join(_app_dir(), "discord-reports")
+ARCHIVE_DIR = os.path.join(_app_dir(), "archive")
+
+
+def setup_workdir() -> None:
+    """Ensure the input/output directory structure exists. Idempotent."""
+    os.makedirs(DISCORD_INPUT_DIR, exist_ok=True)
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+
+def make_run_dir() -> str:
+    """Create archive/<YYYY-MM-DD_HHMMSS>/ for this run and return its path."""
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    run_dir = os.path.join(ARCHIVE_DIR, stamp)
+    os.makedirs(os.path.join(run_dir, "wow"), exist_ok=True)
+    os.makedirs(os.path.join(run_dir, "discord"), exist_ok=True)
+    return run_dir
+
+
+def archive_snapshot_json(snap: 'GuildSnapshot', dest_dir: str) -> str:
+    """Serialize a GuildSnapshot to JSON for re-audit / longitudinal comparison."""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", snap.guild_name).strip("_") or "guild"
+    realm = (snap.realm_slug or "unknown").replace("/", "_")
+    path = os.path.join(dest_dir, f"snapshot_{safe}_{realm}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({
+            "guild_name": snap.guild_name,
+            "realm_slug": snap.realm_slug,
+            "captured_at": snap.captured_at,
+            "members": snap.members,
+        }, f, indent=2, default=str)
+    return path
+
+
+def load_config() -> dict[str, Any]:
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_config(config: dict[str, Any]) -> None:
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    except Exception as e:
+        print(f"  ! Couldn't save config: {e}")
+
+# Force UTF-8 on stdout so the pretty arrows / checkmarks below don't crash on
+# Windows consoles whose default codepage is cp1252. No-op on Python builds
+# that don't support reconfigure() or platforms that don't need it.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # ──────────────────────────────────────────────────────────────────
-# Lua parser (port of wow_addon/companion/lua-parser.js)
+# Lua parser (hand-rolled, no third-party dependency)
 # Recursive-descent. No eval. Handles tables, strings, numbers,
 # booleans, nil, line + block comments. Sufficient for WoW
 # SavedVariables (which is a constrained subset of Lua).
@@ -514,6 +587,23 @@ def read_discord_csvs(paths: list[str]) -> list[DiscordMember]:
 # ──────────────────────────────────────────────────────────────────
 
 
+# Decode the JWT payload locally (no signature check — just want the username
+# for the report header). JWT is `header.payload.signature` with each part
+# being URL-safe base64 of JSON.
+def decode_jwt_payload(token: str) -> dict[str, Any]:
+    import base64
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload = parts[1]
+        # Pad to multiple of 4 (URL-safe base64 strips padding)
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+    except Exception:
+        return {}
+
+
 def fetch_json(url: str, token: str, timeout: int = 30) -> Any:
     req = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {token}",
@@ -586,6 +676,10 @@ def audit(
     main_index: dict[str, dict[str, Any]] = {}  # name lower → main char dict
     alt_pointers: list[tuple[dict[str, Any], str]] = []  # (alt_char, claimed_main_name_lower)
     by_char_realm: dict[tuple[str, str], dict[str, Any]] = {}
+    # Realms we captured a roster for — the only realms where we can authoritatively
+    # say "this character is/isn't in our guild." For Discord members on uncaptured
+    # realms, all we can honestly report is "we didn't scan that guild."
+    captured_realms: set[str] = set()
     for snap in snapshots:
         for m in snap.members:
             entry = dict(m)
@@ -593,6 +687,8 @@ def audit(
             in_game.append(entry)
             char = (m.get("name") or "").lower()
             realm = (m.get("realmSlug") or "").lower()
+            if realm:
+                captured_realms.add(realm)
             by_char_realm[(char, realm)] = entry
             rank_name = (m.get("rankName") or "").upper().strip()
             if rank_name in MAIN_RANK_NAMES:
@@ -600,6 +696,8 @@ def audit(
             mm = ALT_NOTE_RE.match(m.get("officerNote") or "")
             if mm:
                 alt_pointers.append((entry, mm.group("main").lower()))
+        if snap.realm_slug:
+            captured_realms.add(snap.realm_slug.lower())
 
     # CHECK 1: Mains who left in-game but their alts remain.
     orphaned_mains: dict[str, list[dict[str, Any]]] = {}
@@ -639,7 +737,11 @@ def audit(
                     discord_by_char_realm[(d.char_name, d.realm_slug)] = d
                 discord_by_char.setdefault(d.char_name, []).append(d)
 
-        # CHECK 3: Discord member with main role but their (char, realm) isn't in any captured guild.
+        # CHECK 3: Discord member with main role but their (char, realm) isn't in
+        # any captured guild. Severity depends on whether we actually scanned
+        # that realm — if we didn't capture the realm's guild, we can't honestly
+        # call this an action item, so we bucket those into one INFO line.
+        uncaptured_misses: dict[str, list[DiscordMember]] = {}  # realm → [d, ...]
         for d in discord_members:
             if not d.is_main:
                 continue
@@ -664,14 +766,36 @@ def audit(
                         detail=f"Discord shows {d.realm_slug or '?'} but in-game character is on {actual.get('realmSlug','?')} — update Discord nickname.",
                         severity="action",
                     ))
-                else:
+                elif d.realm_slug and d.realm_slug in captured_realms:
+                    # We DID scan this realm — they should be in the roster, but aren't.
                     findings.append(Finding(
-                        category=f"Discord {d.main_role} not in any guild",
+                        category=f"Discord {d.main_role} not in any captured guild",
                         character=d.char_name.title(),
-                        realm=d.realm_slug or "?",
-                        detail=f"User {d.user} has '{d.main_role}' role but no matching in-game character. Demote to MDGA Friend or remove.",
+                        realm=d.realm_slug,
+                        detail=f"User {d.user} has '{d.main_role}' role but isn't in the captured guild on {d.realm_slug}. Demote to MDGA Friend or remove.",
                         severity="action",
                     ))
+                else:
+                    # Realm wasn't captured — bucket and report as one INFO line.
+                    bucket_key = d.realm_slug or "(no realm in nick)"
+                    uncaptured_misses.setdefault(bucket_key, []).append(d)
+
+        if uncaptured_misses:
+            total = sum(len(v) for v in uncaptured_misses.values())
+            captured_list = ", ".join(sorted(captured_realms)) or "none"
+            top_realms = sorted(uncaptured_misses.items(), key=lambda kv: -len(kv[1]))[:8]
+            sample = ", ".join(f"{realm} ({len(ds)})" for realm, ds in top_realms)
+            findings.append(Finding(
+                category="Discord members on realms we didn't scan",
+                character="-",
+                realm="-",
+                detail=(
+                    f"{total} Discord members hold a main role but their nick's realm wasn't in your "
+                    f"capture set. Captured realms: {captured_list}. Top uncaptured realms by count: "
+                    f"{sample}. Re-run with /reload in each federation guild to convert these to ACTION items."
+                ),
+                severity="info",
+            ))
 
         # CHECK 4: In-game main rank but no Discord presence at all.
         for char_lower, entry in main_index.items():
@@ -685,35 +809,16 @@ def audit(
                 severity="action",
             ))
 
-        # CHECK 5: Rank disagreement — Discord says one rank, in-game says another.
-        for d in discord_members:
-            if not d.is_main or not d.char_name:
-                continue
-            entry = by_char_realm.get((d.char_name, d.realm_slug)) or main_index.get(d.char_name)
-            if not entry:
-                continue
-            in_game_rank = (entry.get("rankName") or "").strip()
-            # Map Discord main role → expected in-game rank
-            if d.main_role == "Durotarian" and in_game_rank.upper() != "DUROTARIAN":
-                if in_game_rank.upper() in {"ALT", "TRIAL"}:
-                    findings.append(Finding(
-                        category="Discord = Durotarian but in-game = " + in_game_rank,
-                        character=entry.get("name", "?"),
-                        realm=entry.get("realmSlug", "?"),
-                        detail=f"User {d.user}: promote in-game OR demote Discord role.",
-                        severity="action",
-                    ))
-            elif d.main_role == "Elwynnian" and in_game_rank.upper() != "ELWYNNIAN":
-                findings.append(Finding(
-                    category="Discord = Elwynnian but in-game = " + in_game_rank,
-                    character=entry.get("name", "?"),
-                    realm=entry.get("realmSlug", "?"),
-                    detail=f"User {d.user}: promote in-game OR demote Discord role.",
-                    severity="action",
-                ))
-
-        # CHECK 6: Discord roles that mirror in-game ranks (Honorbound, Champion, Durotari…)
-        # — flag if the Discord role doesn't match the in-game rank.
+        # CHECK 5/6 (consolidated): Rank match. The user's in-game rank should be
+        # represented by at least one of their Discord rank-tier roles. Officers
+        # legitimately hold multiple ceremonial roles on top (Warchief +
+        # War Council + RWC), so we never flag extras — only the *absence* of
+        # their actual in-game rank from the Discord role set. The set of
+        # rank-tier roles includes main-faction roles (Durotarian / Elwynnian),
+        # since those are simultaneously the "I'm a member" badge AND a literal
+        # in-game rank name. Severity is ACTION when the in-game rank is
+        # ALT/TRIAL (real demotion not yet reflected in Discord), WARN otherwise.
+        rank_role_universe = GAME_RANK_ROLES | MAIN_ROLES
         for d in discord_members:
             if not d.char_name:
                 continue
@@ -721,19 +826,27 @@ def audit(
             if not entry:
                 continue
             in_game_rank = (entry.get("rankName") or "").strip()
-            held_game_roles = d.roles & GAME_RANK_ROLES
-            if in_game_rank and held_game_roles:
-                # Each held game-rank role should match the in-game rank
-                for role in held_game_roles:
-                    if role.upper() != in_game_rank.upper() and \
-                       not (role == "Durotari" and in_game_rank.upper() == "THE DUROTARI"):
-                        findings.append(Finding(
-                            category="Sub-rank Discord role doesn't match in-game",
-                            character=entry.get("name", "?"),
-                            realm=entry.get("realmSlug", "?"),
-                            detail=f"Discord role '{role}' but in-game rank is '{in_game_rank}'.",
-                            severity="warn",
-                        ))
+            if not in_game_rank:
+                continue
+            held_rank_roles = d.roles & rank_role_universe
+            if not held_rank_roles:
+                continue  # User holds no rank-mirror roles — can't audit
+            normalized_in_game = "DUROTARI" if in_game_rank.upper() == "THE DUROTARI" else in_game_rank.upper()
+            held_upper = {r.upper() for r in held_rank_roles}
+            if normalized_in_game not in held_upper:
+                is_demotion = in_game_rank.upper() in {"ALT", "TRIAL"}
+                findings.append(Finding(
+                    category="Discord rank doesn't match in-game" + (" (demoted)" if is_demotion else ""),
+                    character=entry.get("name", "?"),
+                    realm=entry.get("realmSlug", "?"),
+                    detail=(
+                        f"In-game rank '{in_game_rank}' but Discord roles are: "
+                        f"{', '.join(sorted(held_rank_roles))}. "
+                        + ("Demote in Discord — they're no longer a main." if is_demotion
+                           else "Promote in-game OR adjust Discord role.")
+                    ),
+                    severity="action" if is_demotion else "warn",
+                ))
 
     # CHECK 7: Website report counts (if available).
     if website:
@@ -782,6 +895,120 @@ def print_console_report(findings: list[Finding]) -> None:
             print(f"    ... and {len(items) - 25} more (see CSV)")
 
 
+SEVERITY_FILLS = {
+    "action": PatternFill(start_color="FFF8D7DA", end_color="FFF8D7DA", fill_type="solid"),  # red-ish
+    "warn":   PatternFill(start_color="FFFFF3CD", end_color="FFFFF3CD", fill_type="solid"),  # amber
+    "info":   PatternFill(start_color="FFD1ECF1", end_color="FFD1ECF1", fill_type="solid"),  # blue-ish
+}
+SEVERITY_FONT = {
+    "action": Font(bold=True, color="FF842029"),
+    "warn":   Font(color="FF664D03"),
+    "info":   Font(color="FF055160"),
+}
+
+
+def write_xlsx_report(
+    findings: list[Finding],
+    path: str,
+    capture_summary: list[str] | None = None,
+    generated_by: str | None = None,
+) -> None:
+    """Write a formatted Excel workbook with two sheets:
+       1. Summary — count of findings per category, plus the capture summary.
+       2. Findings — every finding as a row in an Excel Table (filterable, banded).
+    """
+    wb = Workbook()
+
+    # ── Sheet 1: Summary ──
+    summary_ws = wb.active
+    summary_ws.title = "Summary"
+    summary_ws["A1"] = "MDGA Audit Report"
+    summary_ws["A1"].font = Font(bold=True, size=16)
+    summary_ws["A2"] = f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    summary_ws["A2"].font = Font(italic=True, color="FF666666")
+    row = 3
+    if generated_by:
+        summary_ws.cell(row=row, column=1, value=f"Run by: {generated_by}").font = Font(italic=True, color="FF666666")
+        row += 1
+    row += 1  # blank spacer
+    if capture_summary:
+        summary_ws.cell(row=row, column=1, value="Captured guilds").font = Font(bold=True)
+        row += 1
+        for line in capture_summary:
+            summary_ws.cell(row=row, column=1, value=line)
+            row += 1
+        row += 1
+
+    summary_ws.cell(row=row, column=1, value="Findings by category").font = Font(bold=True)
+    row += 1
+    summary_ws.cell(row=row, column=1, value="Category").font = Font(bold=True)
+    summary_ws.cell(row=row, column=2, value="Count").font = Font(bold=True)
+    summary_ws.cell(row=row, column=3, value="Highest severity").font = Font(bold=True)
+    row += 1
+
+    by_cat: dict[str, list[Finding]] = {}
+    for f in findings:
+        by_cat.setdefault(f.category, []).append(f)
+    severity_rank = {"action": 3, "warn": 2, "info": 1}
+    for cat, items in sorted(by_cat.items(), key=lambda kv: (-max(severity_rank.get(i.severity, 0) for i in kv[1]), kv[0])):
+        sev = max(items, key=lambda i: severity_rank.get(i.severity, 0)).severity
+        summary_ws.cell(row=row, column=1, value=cat)
+        summary_ws.cell(row=row, column=2, value=len(items))
+        sev_cell = summary_ws.cell(row=row, column=3, value=sev.upper())
+        sev_cell.fill = SEVERITY_FILLS.get(sev, PatternFill())
+        sev_cell.font = SEVERITY_FONT.get(sev, Font())
+        row += 1
+
+    summary_ws.column_dimensions["A"].width = 56
+    summary_ws.column_dimensions["B"].width = 10
+    summary_ws.column_dimensions["C"].width = 18
+
+    # ── Sheet 2: Findings (Excel Table — filterable + banded) ──
+    findings_ws = wb.create_sheet("Findings")
+    headers = ["Category", "Severity", "Character", "Realm", "Detail"]
+    findings_ws.append(headers)
+    for f in findings:
+        findings_ws.append([f.category, f.severity.upper(), f.character, f.realm, f.detail])
+    # Style header
+    for col_idx, _ in enumerate(headers, 1):
+        cell = findings_ws.cell(row=1, column=col_idx)
+        cell.font = Font(bold=True, color="FFFFFFFF")
+        cell.fill = PatternFill(start_color="FF333333", end_color="FF333333", fill_type="solid")
+        cell.alignment = Alignment(horizontal="left")
+    # Color the Severity column per row
+    for row_idx in range(2, len(findings) + 2):
+        sev = (findings_ws.cell(row=row_idx, column=2).value or "").lower()
+        cell = findings_ws.cell(row=row_idx, column=2)
+        cell.fill = SEVERITY_FILLS.get(sev, PatternFill())
+        cell.font = SEVERITY_FONT.get(sev, Font())
+
+    # Wrap the Detail column; left-align everything; size columns sensibly
+    widths = {1: 38, 2: 12, 3: 22, 4: 18, 5: 80}
+    for idx, w in widths.items():
+        findings_ws.column_dimensions[get_column_letter(idx)].width = w
+    for row_idx in range(2, len(findings) + 2):
+        findings_ws.cell(row=row_idx, column=5).alignment = Alignment(wrap_text=True, vertical="top")
+    findings_ws.row_dimensions[1].height = 22
+    findings_ws.freeze_panes = "A2"
+
+    # Wrap the data range in an Excel Table so filters/banding are native.
+    if findings:
+        last_col = get_column_letter(len(headers))
+        last_row = len(findings) + 1
+        table = Table(displayName="AuditFindings", ref=f"A1:{last_col}{last_row}")
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium9",
+            showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=False,
+        )
+        findings_ws.add_table(table)
+    else:
+        findings_ws.cell(row=2, column=1, value="No findings — Discord and in-game rosters are in sync.")
+
+    wb.save(path)
+
+
+# Kept for callers that explicitly want CSV; xlsx is now the default.
 def write_csv_report(findings: list[Finding], path: str) -> None:
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["Category", "Severity", "Character", "Realm", "Detail"])
@@ -853,8 +1080,20 @@ def main() -> int:
     print("================================================")
     print("")
 
+    # Make sure discord-reports/ + archive/ exist next to the exe.
+    setup_workdir()
+
+    # Load saved config so prompts pre-fill with last-used values. --reconfigure
+    # forces a clean wizard; otherwise just press Enter at each prompt to accept.
+    force_reconfigure = "--reconfigure" in sys.argv or "--setup" in sys.argv
+    config = {} if force_reconfigure else load_config()
+    if config and not force_reconfigure:
+        print(f"  Loaded config from {os.path.basename(CONFIG_FILE)} — press Enter at any prompt to use the saved value.")
+        print(f"  (Run with --reconfigure to wipe and start fresh.)")
+        print("")
+
     # 1) Locate WoW + account
-    wow_path = detect_wow_path()
+    wow_path = config.get("wow_path") or detect_wow_path()
     if wow_path:
         print(f"  Detected WoW: {wow_path}")
         if not prompt_yes_no("Use this path?", True):
@@ -866,7 +1105,15 @@ def main() -> int:
         else:
             print(f"    Path not found: {p}")
 
-    account = pick_account(wow_path)
+    account = config.get("account_name")
+    if account:
+        if os.path.isdir(os.path.join(wow_path, "WTF", "Account", account)):
+            print(f"  Using saved account: {account}")
+        else:
+            print(f"  Saved account '{account}' not found in WTF/Account — re-picking.")
+            account = None
+    if not account:
+        account = pick_account(wow_path)
     if not account:
         print("  ! Cannot continue without account.")
         return 1
@@ -877,7 +1124,7 @@ def main() -> int:
         return 1
 
     # 2) Capture N guilds
-    n_guilds = prompt_int("How many guilds will you capture", 1)
+    n_guilds = prompt_int("How many guilds will you capture", config.get("n_guilds", 1))
     snapshots: list[GuildSnapshot] = []
     baseline_mtime = os.path.getmtime(sv_path)
     for i in range(1, n_guilds + 1):
@@ -893,52 +1140,44 @@ def main() -> int:
         snapshots.append(snap)
         baseline_mtime = os.path.getmtime(sv_path)
 
-    # 3) Discord roster — point the tool at a folder and it picks up every .csv
-    #    inside (the bot drops one per main rank: Durotarian + Elwynnian). The
-    #    tool de-dupes by Discord user ID.
-    discord_members: list[DiscordMember] | None = None
-    if prompt_yes_no("Have Discord roster CSV(s) to compare?", True):
-        downloads = os.path.join(os.path.expanduser("~"), "Downloads")
-        default_dir = downloads if os.path.isdir(downloads) else (
-            os.path.dirname(os.path.abspath(sys.argv[0])) if not getattr(sys, "frozen", False)
-            else os.path.dirname(sys.executable)
-        )
-        while True:
-            folder = prompt("Folder containing the bot CSVs", default=default_dir).strip('"').strip("'")
-            if os.path.isdir(folder):
-                csvs = sorted(
-                    os.path.join(folder, f) for f in os.listdir(folder)
-                    if f.lower().endswith(".csv")
-                )
-                if not csvs:
-                    print(f"    No .csv files in {folder}.")
-                    if not prompt_yes_no("Try a different folder?", True):
-                        break
-                    continue
-                print(f"  Found {len(csvs)} CSV file(s):")
-                for c in csvs:
-                    print(f"    - {os.path.basename(c)}")
-                if not prompt_yes_no("Use these?", True):
-                    continue
-                try:
-                    discord_members = read_discord_csvs(csvs)
-                    main_count = sum(1 for m in discord_members if m.is_main)
-                    print(f"  ✓ Loaded {len(discord_members)} Discord members ({main_count} with main rank).")
-                    break
-                except Exception as e:
-                    print(f"    Couldn't read CSVs: {e}")
-                    if not prompt_yes_no("Try a different folder?", True):
-                        break
-            else:
-                print(f"    Folder not found: {folder}")
-                if not prompt_yes_no("Try a different folder?", True):
-                    break
+    # 3) Discord roster — fixed location: <exe>/discord-reports/. If empty, bail
+    #    with explicit instructions so the officer knows where to drop the bot
+    #    CSVs. Files are moved into the run's archive after a successful audit.
+    discord_csvs = sorted(
+        os.path.join(DISCORD_INPUT_DIR, f) for f in os.listdir(DISCORD_INPUT_DIR)
+        if f.lower().endswith(".csv")
+    ) if os.path.isdir(DISCORD_INPUT_DIR) else []
+    if not discord_csvs:
+        print("")
+        print(f"  ! No Discord CSVs found in: {DISCORD_INPUT_DIR}")
+        print( "  ! Steps to fix:")
+        print( "  !   1. Open Discord → #bot-spam channel")
+        print( "  !   2. Download the latest two roster CSV exports (Durotarian + Elwynnian)")
+        print(f"  !   3. Drop both files into:  {DISCORD_INPUT_DIR}")
+        print( "  !   4. Re-run this tool")
+        return 1
+    print("")
+    print(f"  Found {len(discord_csvs)} Discord CSV(s) in {DISCORD_INPUT_DIR}:")
+    for c in discord_csvs:
+        print(f"    - {os.path.basename(c)}")
+    discord_members = read_discord_csvs(discord_csvs)
+    main_count = sum(1 for m in discord_members if m.is_main)
+    print(f"  ✓ Loaded {len(discord_members)} Discord members ({main_count} with main rank).")
 
-    # 4) Website pull (optional)
+    # 4) Website pull (optional). The token is also used to attribute the report.
     website: dict[str, Any] | None = None
+    generated_by: str | None = None
+    server: str = config.get("server_url") or DEFAULT_SERVER
+    token: str = config.get("token") or ""
     if prompt_yes_no("Pull current website roster from mdga.gg?", True):
-        server = prompt("Server URL", DEFAULT_SERVER)
-        token = prompt("Token (paste from /profile)")
+        server = prompt("Server URL", server)
+        token = prompt("Token (paste from /profile)", default=token if token else None) if not token else (
+            prompt("Token (Enter to use saved)", default=token)
+        )
+        payload = decode_jwt_payload(token)
+        username = payload.get("username") or "unknown"
+        rank = payload.get("rank") or ""
+        generated_by = f"{username}{f' ({rank})' if rank else ''}"
         try:
             website = fetch_website_audit_data(server, token)
             print(f"  ✓ Fetched website reports")
@@ -946,15 +1185,43 @@ def main() -> int:
             print(f"  ! Website fetch failed: {e}")
             website = None
 
-    # 5) Audit + reports
+    # 5) Audit
     findings = audit(snapshots, discord_members, website)
     print_console_report(findings)
 
-    out_dir = os.path.dirname(os.path.abspath(sys.argv[0])) if not getattr(sys, "frozen", False) else os.path.dirname(sys.executable)
-    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    csv_path = os.path.join(out_dir, f"MDGA_audit_{stamp}.csv")
-    write_csv_report(findings, csv_path)
-    print(f"\n  Saved full report → {csv_path}")
+    # 6) Output: create archive/<timestamp>/ holding xlsx + moved inputs.
+    run_dir = make_run_dir()
+    xlsx_path = os.path.join(run_dir, "MDGA_audit.xlsx")
+    capture_summary = [f"{snap.guild_name} ({len(snap.members)} members)" for snap in snapshots]
+    write_xlsx_report(findings, xlsx_path, capture_summary=capture_summary, generated_by=generated_by)
+
+    # 6a) Snapshot WoW rosters as JSON for re-audit / longitudinal compare.
+    for snap in snapshots:
+        archive_snapshot_json(snap, os.path.join(run_dir, "wow"))
+
+    # 6b) Move the Discord CSVs from discord-reports/ into the run archive so
+    #     the input folder is clean for the next run.
+    import shutil
+    for csv_path in discord_csvs:
+        try:
+            shutil.move(csv_path, os.path.join(run_dir, "discord", os.path.basename(csv_path)))
+        except Exception as e:
+            print(f"  ! Couldn't move {os.path.basename(csv_path)} into archive: {e}")
+
+    # 7) Persist config so the next run skips most prompts.
+    save_config({
+        "wow_path": wow_path,
+        "account_name": account,
+        "server_url": server,
+        "token": token,
+        "n_guilds": n_guilds,
+    })
+
+    print(f"\n  Run archived → {run_dir}")
+    print(f"  Excel report  → {xlsx_path}")
+    if generated_by:
+        print(f"  Report attributed to: {generated_by}")
+    print( "  discord-reports/ is now empty — drop fresh CSVs there for the next run.")
     print("")
     return 0
 

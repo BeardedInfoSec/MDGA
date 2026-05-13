@@ -227,6 +227,7 @@ export default function Admin() {
   const [guildSortOrder, setGuildSortOrder] = useState('ASC');
   const [guildSyncing, setGuildSyncing] = useState(false);
   const [trackedGuilds, setTrackedGuilds] = useState([]);
+  const [selectedGuildId, setSelectedGuildId] = useState(null); // null = primary
   const [gameRankRosterRanks, setGameRankRosterRanks] = useState([]); // distinct ranks from guild roster
   const [gameRankMappingState, setGameRankMappingState] = useState({}); // { gameRank: { discord_role_id, site_rank, game_rank_name } }
   const [gameRankDiscordRoles, setGameRankDiscordRoles] = useState([]); // Discord roles from bot cache
@@ -473,9 +474,10 @@ export default function Admin() {
   }, [apiFetch, showToast]);
 
   // ── Guild loaders ──
-  const loadGuildProfile = useCallback(async () => {
+  const loadGuildProfile = useCallback(async (guildId) => {
     try {
-      const res = await apiFetch('/guild/summary');
+      const url = guildId ? `/guild/summary?guild_id=${guildId}` : '/guild/summary';
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         setGuildProfile(data.guild);
@@ -483,13 +485,14 @@ export default function Admin() {
     } catch { /* swallow */ }
   }, [apiFetch]);
 
-  const loadGuildRoster = useCallback(async (search, classF, rankF, sort, order, pg, pgSize, bannedFilter) => {
+  const loadGuildRoster = useCallback(async (search, classF, rankF, sort, order, pg, pgSize, bannedFilter, guildId) => {
     try {
       const params = new URLSearchParams();
       if (search) params.set('search', search);
       if (classF) params.set('class', classF);
       if (rankF !== '') params.set('rank', rankF);
       if (bannedFilter) params.set('banned', '1');
+      if (guildId) params.set('guild_id', guildId);
       params.set('sort', sort || 'guild_rank');
       params.set('order', order || 'ASC');
       params.set('page', String(pg || 1));
@@ -520,8 +523,8 @@ export default function Admin() {
       await apiFetch('/guild/sync', { method: 'POST', body: JSON.stringify({}) });
       showToast('Guild sync started');
       setTimeout(() => {
-        loadGuildProfile();
-        loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter);
+        loadGuildProfile(selectedGuildId);
+        loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId);
         setGuildSyncing(false);
       }, 3000);
     } catch {
@@ -707,7 +710,7 @@ export default function Admin() {
     else if (activeTab === 'roles') { loadRoles(); loadPermissions(); loadGuildProfile(); }
     else if (activeTab === 'user-roles') loadUsers();
     else if (activeTab === 'discord-roles') { loadDiscordGuildRoles(); loadDiscordMappings(); loadRoles(); }
-    else if (activeTab === 'guild') { loadGuildProfile(); loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter); loadTrackedGuilds(); loadBannedUsers(); }
+    else if (activeTab === 'guild') { loadGuildProfile(selectedGuildId); loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId); loadTrackedGuilds(); loadBannedUsers(); }
     else if (activeTab === 'reconciliation') { loadReconciliation(); }
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -730,10 +733,15 @@ export default function Admin() {
     setGuildPage(1);
   }, [guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPageSize, guildBannedFilter]);
 
-  // Reload guild roster when search/filter/sort/page changes
+  // Reload guild roster when search/filter/sort/page or selected guild changes
   useEffect(() => {
-    if (activeTab === 'guild') loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter);
-  }, [guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (activeTab === 'guild') loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId);
+  }, [guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reload guild profile (and reset to page 1) when selected guild changes
+  useEffect(() => {
+    if (activeTab === 'guild') { loadGuildProfile(selectedGuildId); setGuildPage(1); }
+  }, [selectedGuildId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Event handlers ──
   const openAddEvent = () => {
@@ -812,7 +820,7 @@ export default function Admin() {
   };
 
   // ── User handlers ──
-  const refreshGuild = () => loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter);
+  const refreshGuild = () => loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId);
 
   const changeRank = async (userId, newRank) => {
     try {
@@ -852,7 +860,7 @@ export default function Admin() {
         setBanModal(null);
         setBanReason('');
         loadBannedUsers();
-        loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter);
+        loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId);
       } else {
         const data = await res.json();
         showToast(data.error || 'Failed to ban user');
@@ -3159,6 +3167,35 @@ export default function Admin() {
         {/* ── Guild Tab ── */}
         {activeTab === 'guild' && (
           <div>
+            {/* Federation guild selector — defaults to primary */}
+            {trackedGuilds.length > 1 && (
+              <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <label htmlFor="guild-selector" style={{ color: '#aaa' }}>Viewing:</label>
+                <select
+                  id="guild-selector"
+                  value={selectedGuildId || ''}
+                  onChange={(e) => setSelectedGuildId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                  style={{
+                    background: '#1a1a1a', color: '#eee', border: '1px solid #444',
+                    borderRadius: '4px', padding: '0.4rem 0.6rem', minWidth: '320px',
+                  }}
+                >
+                  <option value="">Primary (default)</option>
+                  {[...trackedGuilds]
+                    .sort((a, b) => (b.is_primary - a.is_primary) || a.realm_slug.localeCompare(b.realm_slug))
+                    .map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} — {g.realm_slug}
+                        {g.is_primary ? ' (primary)' : ''}
+                      </option>
+                    ))}
+                </select>
+                <span style={{ color: '#666', fontSize: '0.85rem' }}>
+                  {trackedGuilds.length} federation guilds tracked
+                </span>
+              </div>
+            )}
+
             {/* Guild Profile Card */}
             {guildProfile ? (
               <div className={styles.guildProfileCard}>

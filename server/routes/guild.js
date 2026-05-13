@@ -9,10 +9,18 @@ const router = express.Router();
 
 // ─── MEMBER ENDPOINTS ───
 
-// GET /api/guild/summary — primary guild profile + recent activity + achievements (for home page)
+// GET /api/guild/summary — guild profile + recent activity + achievements.
+// Defaults to the primary guild for the home page; admin Guild tab passes
+// ?guild_id=N to switch to any tracked federation guild.
 router.get('/summary', requireAuth, async (req, res) => {
   try {
-    const [guilds] = await pool.execute('SELECT * FROM guilds WHERE is_primary = TRUE LIMIT 1');
+    const guildIdRaw = parseInt(req.query.guild_id, 10);
+    let guilds;
+    if (Number.isFinite(guildIdRaw) && guildIdRaw > 0) {
+      [guilds] = await pool.execute('SELECT * FROM guilds WHERE id = ? LIMIT 1', [guildIdRaw]);
+    } else {
+      [guilds] = await pool.execute('SELECT * FROM guilds WHERE is_primary = TRUE LIMIT 1');
+    }
     if (guilds.length === 0) return res.json({ guild: null, recentActivity: [], recentAchievements: [] });
     const guild = guilds[0];
 
@@ -33,10 +41,12 @@ router.get('/summary', requireAuth, async (req, res) => {
       guild: {
         id: guild.id,
         name: guild.name,
+        realm_slug: guild.realm_slug,
         faction: guild.faction,
         member_count: guild.member_count,
         achievement_points: guild.achievement_points,
         last_synced_at: guild.last_synced_at,
+        is_primary: !!guild.is_primary,
       },
       recentActivity,
       recentAchievements,

@@ -936,7 +936,7 @@ Uploaded files are saved to the `uploads/` directory and served via `/uploads/` 
 
 ## 21. WoW Addon Integration
 
-The project includes a companion WoW addon that sends real-time guild data to the website.
+The project includes an in-game WoW addon (`wow_addon/MDGA/`) that captures guild roster + officer notes + rank-change events. The data lives in the addon's SavedVariables file and is consumed by the **MDGA Audit Tool** (`tools/mdga-audit/`) on demand to produce the audit Excel report.
 
 ### What the Addon Tracks
 

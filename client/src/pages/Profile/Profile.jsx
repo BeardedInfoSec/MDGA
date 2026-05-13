@@ -64,7 +64,10 @@ export default function Profile() {
   const [companionError, setCompanionError] = useState('');
   const [companionCopied, setCompanionCopied] = useState(false);
 
-  const isOfficerSelf = isOwnProfile && ['officer', 'guildmaster'].includes(user?.rank);
+  // Token generation is restricted to Guildmaster rank or any user holding the
+  // `admin.view_panel` permission (matching the server-side gate).
+  const isAdminOrGm = user?.rank === 'guildmaster' || (user?.permissions || []).includes('admin.view_panel');
+  const isOfficerSelf = isOwnProfile && isAdminOrGm;
 
   const handleGenerateCompanionToken = async () => {
     setCompanionGenerating(true);
