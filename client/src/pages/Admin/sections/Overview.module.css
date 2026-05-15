@@ -1,0 +1,401 @@
+/* ==========================================================================
+   Overview - admin landing page
+   Dark fantasy aesthetic: translucent gray cards, gold accents, red alerts.
+   ========================================================================== */
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+  color: var(--color-text-primary);
+}
+
+/* ----- Header ----- */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-3xl);
+  color: var(--color-text-heading);
+  letter-spacing: 1px;
+  line-height: var(--line-height-tight);
+}
+
+.subtitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+/* ----- Stats grid (4 cards) ----- */
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+
+.statCard {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.statCard:hover,
+.statCard:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--color-gold-dark);
+  box-shadow: var(--shadow-glow-gold);
+  background: var(--color-gray-800);
+  outline: none;
+}
+
+.statCardAlert {
+  border-color: var(--color-red-dark);
+}
+
+.statCardAlert:hover,
+.statCardAlert:focus-visible {
+  border-color: var(--color-red);
+  box-shadow: var(--shadow-glow-red);
+}
+
+.statIconWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--border-radius-md);
+  background: rgba(255, 224, 51, 0.08);
+  border: 1px solid var(--color-gray-700);
+}
+
+.statCardAlert .statIconWrap {
+  background: rgba(185, 28, 28, 0.12);
+}
+
+.statIcon {
+  color: var(--color-gold);
+}
+
+.statCardAlert .statIcon {
+  color: var(--color-red-light);
+}
+
+.statBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.statValue {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  line-height: 1;
+  color: var(--color-gold);
+  letter-spacing: 0.5px;
+}
+
+.statValueAlert {
+  color: var(--color-red-light);
+}
+
+.statLabel {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary);
+}
+
+.statChevron {
+  color: var(--color-gray-700);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.statCard:hover .statChevron,
+.statCard:focus-visible .statChevron {
+  color: var(--color-gold);
+  transform: translateX(2px);
+}
+
+/* ----- Two-column layout (activity + quick actions) ----- */
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.activityPanel,
+.quickActions {
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.panelHeaderIcon {
+  color: var(--color-gold);
+}
+
+.panelTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  color: var(--color-text-heading);
+  letter-spacing: 0.5px;
+}
+
+/* ----- Activity feed ----- */
+
+.activityList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.activityRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.activityRow:last-child {
+  border-bottom: none;
+}
+
+.activityIconWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--border-radius-sm);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+}
+
+.activityIcon {
+  color: var(--color-gold-dark);
+}
+
+.activityContent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.activityDescription {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activityTime {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.emptyState {
+  margin: 0;
+  padding: var(--space-6) 0;
+  text-align: center;
+  font-family: var(--font-body);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ----- Quick action buttons ----- */
+
+.actionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.actionButton {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  text-decoration: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.actionButton:hover,
+.actionButton:focus-visible {
+  background: var(--color-gray-700);
+  border-color: var(--color-gold-dark);
+  transform: translateX(2px);
+  outline: none;
+}
+
+.actionIcon {
+  color: var(--color-gold);
+}
+
+.actionLabel {
+  text-align: left;
+  letter-spacing: 0.3px;
+}
+
+.actionBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: var(--color-red);
+  color: var(--color-text-on-red);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+
+.actionArrow {
+  color: var(--color-text-secondary);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.actionButton:hover .actionArrow,
+.actionButton:focus-visible .actionArrow {
+  color: var(--color-gold);
+  transform: translateX(2px);
+}
+
+/* ----- Loading skeletons ----- */
+
+@keyframes overviewPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
+
+.skeletonNumber {
+  height: 2.5rem;
+  width: 60%;
+  background: var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  animation: overviewPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--border-radius-sm);
+  background: var(--color-gray-800);
+  animation: overviewPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonLineWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.skeletonLine {
+  height: 12px;
+  width: 80%;
+  background: var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  animation: overviewPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonLineShort {
+  height: 10px;
+  width: 30%;
+  background: var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  animation: overviewPulse 1.4s ease-in-out infinite;
+}
+
+/* ----- Responsive ----- */
+
+@media (max-width: 1024px) {
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .twoColumn {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+  .statValue {
+    font-size: 2rem;
+  }
+  .title {
+    font-size: var(--font-size-2xl);
+  }
+  .activityPanel,
+  .quickActions,
+  .statCard {
+    padding: var(--space-4);
+  }
+}

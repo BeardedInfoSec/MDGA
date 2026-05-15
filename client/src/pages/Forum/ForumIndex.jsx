@@ -1,18 +1,30 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
-import PageHero from '../../components/common/PageHero';
+import { authorDisplayName, authorProfileLink, isFormerMember } from '../../utils/forumAuthor';
+import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 
-const CATEGORY_ICONS = {
+const FALLBACK_ICONS = {
   'General Discussion': '\u{1F4AC}',
-  'PvP Strategy': '\u2694\uFE0F',
+  'PvP Strategy': '⚔️',
   'Recruitment': '\u{1F4CB}',
   'Off-Topic': '\u{1F3AE}',
   'Guild Announcements': '\u{1F4E2}',
 };
+
+const SUGGEST_LABELS = { title: 'Title', body: 'Body', reply: 'Reply', user: 'User' };
+const MATCH_LABELS = { title: 'Title match', body: 'Body match', reply: 'Reply match', user: 'User match' };
+
+// Strip control characters (U+0000–U+001F + U+007F DEL) that can leak in
+// from copy-paste; safer than a literal regex range.
+const CTRL_RE = new RegExp('[\\u0000-\\u001F\\u007F]', 'g');
+function cleanForumTitle(value) {
+  return String(value || '').replace(CTRL_RE, '').trim();
+}
+
 
 export default function ForumIndex() {
   useDocumentTitle('Forum | MDGA');
@@ -42,10 +54,7 @@ export default function ForumIndex() {
   }, [isLoggedIn, apiFetch]);
 
   const doSearch = useCallback(async () => {
-    if (searchQuery.length < 2) {
-      setSearchResults(null);
-      return;
-    }
+    if (searchQuery.length < 2) { setSearchResults(null); return; }
     try {
       const res = isLoggedIn
         ? await apiFetch(`/forum/search?q=${encodeURIComponent(searchQuery)}`)
@@ -74,20 +83,13 @@ export default function ForumIndex() {
   const handleSearchInput = (e) => {
     const val = e.target.value;
     setSearchQuery(val);
-    if (!val.trim()) {
-      setSearchResults(null);
-      setSuggestions(null);
-      return;
-    }
+    if (!val.trim()) { setSearchResults(null); setSuggestions(null); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSuggest(val.trim()), 300);
   };
 
   const handleSearchKey = (e) => {
-    if (e.key === 'Enter') {
-      setSuggestions(null);
-      doSearch();
-    }
+    if (e.key === 'Enter') { setSuggestions(null); doSearch(); }
   };
 
   const clearSearch = () => {
@@ -96,73 +98,127 @@ export default function ForumIndex() {
     setSuggestions(null);
   };
 
-  const cleanTitle = (value) => String(value || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
-
-  const matchLabels = { title: 'Title match', body: 'Body match', reply: 'Reply match', user: 'User match' };
-  const suggestLabels = { title: 'Title', body: 'Body', reply: 'Reply', user: 'User' };
+  // Aggregate stats for the title band
+  const stats = useMemo(() => {
+    const totalPosts = categories.reduce((s, c) => s + (c.post_count || 0), 0);
+    const officerCount = categories.filter((c) => c.officer_only).length;
+    return [
+      { value: String(categories.length), label: 'Categories' },
+      { value: String(totalPosts), label: 'Total posts' },
+      { value: String(officerCount), label: 'Officer-only' },
+      isLoggedIn
+        ? { value: 'Active', label: 'Member access' }
+        : { value: 'Public', label: 'Browse mode' },
+    ];
+  }, [categories, isLoggedIn]);
 
   return (
-    <>
-      <PageHero title="Forum" subtitle="Guild discussion board" />
-      <section className="section">
-        <div className="container">
-          {/* Search */}
-          <div className={styles.search}>
-            <input
-              className={styles.searchInput}
-              type="text"
-              placeholder="Search posts..."
-              value={searchQuery}
-              onChange={handleSearchInput}
-              onKeyDown={handleSearchKey}
-              onFocus={() => { if (searchQuery.length >= 2) doSuggest(searchQuery); }}
-              onBlur={() => setTimeout(() => setSuggestions(null), 200)}
-            />
-            <button className={styles.searchBtn} onClick={() => { setSuggestions(null); doSearch(); }}>
+    <div className={styles.forumPage}>
+      {/* Title band */}
+      <header className={styles.forumTitleBand}>
+        <div className={styles.forumTitleBandInner}>
+          <span className={styles.forumEyebrow}>Guild Discussion</span>
+          <h1 className={styles.forumPageTitle}>Forum</h1>
+          <p className={styles.forumPageSubtitle}>
+            Strategy, recruitment, recaps, off-topic — the guild's open channel. Use the
+            sidebar to jump into any category, or search across every post.
+          </p>
+          <div className={styles.forumStatsInline}>
+            {stats.map((s) => (
+              <div key={s.label} className={styles.forumStatsItem}>
+                <span className={styles.forumStatsValue}>{s.value}</span>
+                <span className={styles.forumStatsLabel}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div className={styles.forumLayout}>
+        <ForumSidebar categories={categories} activeCategoryId={null} />
+
+        <main className={styles.forumContent}>
+          {/* Search toolbar */}
+          <div className={styles.forumToolbar}>
+            <div className={styles.forumSearchWrap}>
+              <input
+                className={styles.forumSearchInput}
+                type="text"
+                placeholder="Search posts, comments, users…"
+                value={searchQuery}
+                onChange={handleSearchInput}
+                onKeyDown={handleSearchKey}
+                onFocus={() => { if (searchQuery.length >= 2) doSuggest(searchQuery); }}
+                onBlur={() => setTimeout(() => setSuggestions(null), 200)}
+              />
+              {suggestions && suggestions.length > 0 && (
+                <div className={styles.forumSuggest}>
+                  {suggestions.map(r => (
+                    <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.forumSuggestItem}>
+                      <span className={styles.forumSuggestTitle}>{cleanForumTitle(r.title)}</span>
+                      <span className={styles.forumSuggestMeta}>{r.category_name} &middot; {SUGGEST_LABELS[r.match_type] || r.match_type}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {suggestions && suggestions.length === 0 && (
+                <div className={styles.forumSuggest}>
+                  <div className={styles.forumSuggestEmpty}>No matches.</div>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => { setSuggestions(null); doSearch(); }}
+            >
               Search
             </button>
-            {suggestions && suggestions.length > 0 && (
-              <div className={styles.suggest}>
-                {suggestions.map(r => (
-                  <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.suggestItem}>
-                    <span className={styles.suggestTitle}>{cleanTitle(r.title)}</span>
-                    <span className={styles.suggestMeta}>{r.category_name} &bull; {suggestLabels[r.match_type] || r.match_type}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-            {suggestions && suggestions.length === 0 && (
-              <div className={styles.suggest}>
-                <div className={styles.suggestEmpty}>No results</div>
-              </div>
-            )}
           </div>
 
-          {/* Search Results */}
+          {/* Search results OR welcome / categories grid */}
           {searchResults !== null ? (
             <>
-              <div className={styles.searchResultsHeader}>
-                <span>{searchResults.length} result{searchResults.length !== 1 ? 's' : ''} for &quot;{searchQuery}&quot;</span>
-                <button className="btn btn--secondary btn--sm" onClick={clearSearch}>Clear</button>
+              <div className={styles.forumSectionHeader}>
+                <div>
+                  <span className={styles.forumSectionEyebrow}>Search</span>
+                  <h2 className={styles.forumSectionTitle}>
+                    {searchResults.length} result{searchResults.length === 1 ? '' : 's'} for &ldquo;{searchQuery}&rdquo;
+                  </h2>
+                </div>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={clearSearch}>Clear</button>
               </div>
               {searchResults.length > 0 ? (
-                <div className={styles.postList}>
-                  {searchResults.map(r => {
+                <div className={styles.forumPostList}>
+                  {searchResults.map((r) => {
                     const netVotes = r.net_votes || 0;
-                    const voteToneClass = netVotes > 0 ? styles.votePositive : netVotes < 0 ? styles.voteNegative : styles.voteNeutral;
+                    const voteCls = netVotes > 0 ? styles.forumPostStatPositive : netVotes < 0 ? styles.forumPostStatNegative : '';
                     return (
-                      <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.postRow}>
-                        <div className={styles.postRowTitle}>
-                          {cleanTitle(r.title)}
-                          <span className={styles.matchTag}>{matchLabels[r.match_type] || r.match_type}</span>
+                      <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.forumPostRow}>
+                        <div className={styles.forumPostTitle}>
+                          {cleanForumTitle(r.title)}
+                          <span className={styles.forumPostTagMatch}>{MATCH_LABELS[r.match_type] || r.match_type}</span>
                         </div>
-                        <div className={styles.postRowMeta}>
-                          <span className={`rank-badge rank-badge--${r.rank}`}>{r.rank}</span>
-                          {' '}<span className={styles.profileLink} onClick={(e) => { e.preventDefault(); navigate(`/profile?id=${r.user_id}`); }}>{r.display_name || r.username}</span> &bull; {timeAgo(r.created_at)} &bull; {r.category_name}
-                          <span className={styles.inlineStats}>
-                            <span className={voteToneClass} title="Votes">&#9650; {netVotes}</span>
-                            <span title="Views">&#128065; {r.view_count || 0}</span>
-                            <span title="Replies">&#128172; {r.comment_count || 0}</span>
+                        <div className={styles.forumPostMeta}>
+                          {!isFormerMember(r) && <span className={`rank-badge rank-badge--${r.rank}`}>{r.display_rank || r.rank}</span>}
+                          {authorProfileLink(r) ? (
+                            <span
+                              className={styles.profileLink}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(authorProfileLink(r)); }}
+                            >
+                              {authorDisplayName(r)}
+                            </span>
+                          ) : (
+                            <span className={styles.profileLink}>{authorDisplayName(r)}</span>
+                          )}
+                          <span>&middot;</span>
+                          <span>{timeAgo(r.created_at)}</span>
+                          <span>&middot;</span>
+                          <span>{r.category_name}</span>
+                          <span className={styles.forumPostStats}>
+                            <span className={`${styles.forumPostStat} ${voteCls}`} title="Net votes">▲ {netVotes}</span>
+                            <span className={styles.forumPostStat} title="Views">{r.view_count || 0} views</span>
+                            <span className={styles.forumPostStat} title="Replies">{r.comment_count || 0} replies</span>
                           </span>
                         </div>
                       </Link>
@@ -170,48 +226,59 @@ export default function ForumIndex() {
                   })}
                 </div>
               ) : (
-                <p className={styles.empty}>No results found.</p>
+                <p className={styles.forumEmptyState}>No results found.</p>
               )}
             </>
           ) : (
-            /* Categories */
-            loading ? (
-              <p className={styles.empty}>Loading...</p>
-            ) : categories.length === 0 ? (
-              <p className={styles.empty}>No categories yet.</p>
-            ) : (
-              <div className={styles.categories}>
-                {categories.map(cat => (
-                  <Link
-                    key={cat.id}
-                    to={`/forum/category/${cat.id}`}
-                    className={cat.officer_only ? styles.categoryOfficer : styles.category}
-                  >
-                    <div className={styles.categoryIcon}>{CATEGORY_ICONS[cat.name] || '\u{1F4AC}'}</div>
-                    <div className={styles.categoryInfo}>
-                      <div className={styles.categoryName}>
-                        {cat.name}
-                        {cat.officer_only && <span className={styles.officerTag}>Officers Only</span>}
-                      </div>
-                      <div className={styles.categoryDesc}>{cat.description || ''}</div>
-                    </div>
-                    <div className={styles.categoryStats}>
-                      <strong>{cat.post_count || 0}</strong>
-                      posts
-                      {cat.latest_post_title && (
-                        <>
-                          <br /><small>Latest: {cleanTitle(cat.latest_post_title)}</small>
-                          <br /><small>{timeAgo(cat.latest_post_date)}</small>
-                        </>
-                      )}
-                    </div>
-                  </Link>
-                ))}
+            <>
+              <div className={styles.forumSectionHeader}>
+                <div>
+                  <span className={styles.forumSectionEyebrow}>Browse</span>
+                  <h2 className={styles.forumSectionTitle}>Categories</h2>
+                </div>
               </div>
-            )
+
+              {loading ? (
+                <p className={styles.forumEmptyState}>Loading…</p>
+              ) : categories.length === 0 ? (
+                <p className={styles.forumEmptyState}>No categories yet.</p>
+              ) : (
+                <div className={styles.forumPostList}>
+                  {categories.map((cat) => (
+                    <Link
+                      key={cat.id}
+                      to={`/forum/category/${cat.id}`}
+                      className={styles.forumPostRow}
+                      style={cat.accent_color ? { borderLeft: `3px solid ${cat.accent_color}` } : undefined}
+                    >
+                      <div className={styles.forumPostTitle}>
+                        <span style={{ fontSize: 18 }} aria-hidden="true">
+                          {cat.icon || FALLBACK_ICONS[cat.name] || '\u{1F4AC}'}
+                        </span>
+                        <span>{cat.name}</span>
+                        {cat.officer_only ? (
+                          <span className={styles.forumPostTagPinned}>Officer-only</span>
+                        ) : null}
+                      </div>
+                      <div className={styles.forumPostMeta}>
+                        <span>{cat.description || 'No description'}</span>
+                        <span className={styles.forumPostStats}>
+                          <span className={styles.forumPostStat}>{cat.post_count || 0} posts</span>
+                          {cat.latest_post_title && (
+                            <span className={styles.forumPostStat} title={cleanForumTitle(cat.latest_post_title)}>
+                              Latest: {timeAgo(cat.latest_post_date)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </>
           )}
-        </div>
-      </section>
-    </>
+        </main>
+      </div>
+    </div>
   );
 }

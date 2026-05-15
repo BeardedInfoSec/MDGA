@@ -15,7 +15,7 @@ const router = express.Router();
 const DISCORD_API = 'https://discord.com/api/v10';
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
+const REDIRECT_URI = 'https://mdga.gg/api/auth/discord/callback';
 
 // In-memory state store for CSRF protection
 // Map<stateToken, { from, createdAt }>
@@ -92,7 +92,10 @@ router.get('/', (req, res) => {
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: 'code',
-    scope: 'identify email',
+    // identify only — Discord does not require `email` to authenticate.
+    // Removing it suppresses the "access your email" line on the consent
+    // screen, which was scaring off recruits.
+    scope: 'identify',
     state,
   });
 
@@ -235,6 +238,7 @@ router.get('/callback', async (req, res) => {
 
       const syncResult = await syncUserRolesFromDiscord(user.id, member);
       const newRank = syncResult.rank;
+      const newDisplayRank = syncResult.displayRank || null;
 
       // Load permissions and issue JWT
       const permissions = await loadUserPermissions(user.id);
@@ -244,6 +248,7 @@ router.get('/callback', async (req, res) => {
         username: user.username,
         displayName: user.display_name,
         rank: newRank,
+        displayRank: newDisplayRank,
         avatarUrl: discordAvatar || user.avatar_url,
         realm: user.realm,
         characterName: user.character_name,
@@ -276,6 +281,7 @@ router.get('/callback', async (req, res) => {
           username: user.username,
           displayName: freshUser[0].display_name,
           rank: freshUser[0].rank,
+          displayRank: freshUser[0].display_rank || null,
           avatarUrl: discordAvatar || freshUser[0].avatar_url,
           realm: freshUser[0].realm,
           characterName: freshUser[0].character_name,

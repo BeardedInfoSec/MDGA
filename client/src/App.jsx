@@ -36,13 +36,16 @@ export default function App() {
         <Route path="/forum/category/:slug" element={<ProtectedRoute><ForumCategory /></ProtectedRoute>} />
         <Route path="/forum/post/:id" element={<ProtectedRoute><ForumPost /></ProtectedRoute>} />
         <Route path="/forum/new/:slug" element={<ProtectedRoute><ForumNewPost /></ProtectedRoute>} />
-        <Route path="/leaderboards" element={<ProtectedRoute><Leaderboards /></ProtectedRoute>} />
+        <Route path="/leaderboards" element={<Leaderboards />} />
         <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
-        {/* Officer+ */}
-        <Route path="/admin" element={<ProtectedRoute requireOfficer><Admin /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
+
+      {/* Admin runs OUTSIDE the regular site Layout — it has its own
+          full-viewport shell (sidebar nav, page header, etc.) so the
+          marketing-site nav and footer don't constrain or duplicate it. */}
+      <Route path="/admin" element={<ProtectedRoute requireOfficer><Admin /></ProtectedRoute>} />
     </Routes>
   );
 }

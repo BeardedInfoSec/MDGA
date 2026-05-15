@@ -62,7 +62,10 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--m-color-bg);
+  /* Transparent so the body::before site-wide background image (set by
+     useSiteBackground in Layout) bleeds through. The body itself still has
+     a solid black background-color, so empty areas stay dark. */
+  background: transparent;
 }
 
 .m-main {

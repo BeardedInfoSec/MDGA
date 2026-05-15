@@ -1,0 +1,92 @@
+.editor {
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-gray-900);
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-gray-800);
+  background: var(--color-gray-800);
+  border-radius: var(--border-radius-sm) var(--border-radius-sm) 0 0;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.tabs { display: inline-flex; gap: 2px; }
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+}
+.tab:hover { color: var(--color-text-primary); border-color: var(--color-gold-dark); }
+.tabActive {
+  color: var(--color-gold);
+  border-color: var(--color-gold-dark);
+  background: rgba(212, 175, 55, 0.08);
+}
+
+.toolbarBtns { display: inline-flex; gap: 2px; }
+
+.toolBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.toolBtn:hover {
+  color: var(--color-gold);
+  background: var(--color-gray-900);
+  border-color: var(--color-gray-700);
+}
+
+.textarea {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  padding: var(--space-3);
+  background: var(--color-gray-900);
+  border: none;
+  color: var(--color-text-primary);
+  resize: vertical;
+  min-height: 100px;
+  outline: none;
+}
+
+.preview {
+  padding: var(--space-3);
+  min-height: 100px;
+  background: var(--color-gray-900);
+}
+
+.previewEmpty {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  margin: 0;
+}

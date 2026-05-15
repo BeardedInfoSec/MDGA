@@ -2,6 +2,188 @@
   overflow: hidden;
 }
 
+/* ──────────────────────────────────────────────────────────────────────
+ * Profile docs-style shell (matches Story / Forum / Leaderboards).
+ * Replaces the old gradient hero with a compact title band.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.page {
+  /* transparent so site-wide bg image shows through */ background: transparent;
+  color: var(--color-text-primary);
+  min-height: calc(100vh - var(--nav-height, 70px));
+}
+
+.titleBand {
+  background: var(--color-black-soft);
+  border-bottom: 1px solid var(--color-gold-dark);
+  padding: var(--space-7) var(--space-6) var(--space-5) var(--space-6);
+}
+
+.titleBand.titleBandAlliance {
+  border-bottom-color: var(--color-alliance);
+}
+
+.titleBandInner {
+  max-width: 1500px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.titleAvatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--color-gold-dark);
+  background: var(--color-gray-800);
+}
+
+.titleBand.titleBandAlliance .titleAvatar { border-color: var(--color-alliance); }
+
+.titleInfo { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.titleEyebrow {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: var(--color-gold-dark);
+  align-self: flex-start;
+}
+
+.titleName {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-shadow: 0 0 20px rgba(212, 175, 55, 0.25);
+}
+
+.titleMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.titleMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.titleStatsInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+  align-self: flex-start;
+}
+
+.titleStat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  border-right: 1px solid var(--color-gray-800);
+}
+
+.titleStat:first-child { padding-left: 0; }
+.titleStat:last-child { border-right: none; }
+
+.titleStatValue {
+  font-family: var(--font-display);
+  font-size: var(--font-size-base);
+  color: var(--color-gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.titleStatLabel {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--color-text-secondary);
+}
+
+.titleActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Body wrapper — matches the layout container width of the title band */
+.body {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.bodySectionHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-gray-800);
+  margin-bottom: var(--space-3);
+}
+
+.bodySectionHeader > div { min-width: 0; }
+
+.bodySectionEyebrow {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: var(--color-gold-dark);
+  margin-bottom: 4px;
+}
+
+.bodySectionTitle {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 1.85rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.bodySectionDesc {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 4px 0 0 0;
+}
+
+@media (max-width: 720px) {
+  .titleBandInner {
+    grid-template-columns: 64px 1fr;
+    gap: var(--space-3);
+  }
+  .titleAvatar { width: 64px; height: 64px; }
+  .titleActions { grid-column: 1 / -1; justify-content: flex-end; }
+  .body { padding: var(--space-5) var(--space-3); }
+}
+
 .hero {
   margin-top: var(--nav-height);
   padding: var(--space-8) 0;

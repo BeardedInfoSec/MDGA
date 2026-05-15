@@ -44,12 +44,17 @@ export default function Nav() {
     <nav className={`${styles.nav} ${scrolled ? styles.navScrolled : ''}`}>
       <div className={styles.container}>
         <Link to="/" className={styles.logo}>
-          <svg className={styles.logoIcon} viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-            <path d="M32 2L8 18v28l24 16 24-16V18L32 2zm0 6l18 12v20L32 52 14 40V20L32 8z" fill="currentColor"/>
-            <path d="M32 16l-12 8v12l12 8 12-8V24l-12-8zm0 4l8 5.3v10.7L32 41.3 24 36V25.3L32 20z" fill="currentColor"/>
-            <circle cx="32" cy="32" r="4" fill="currentColor"/>
-          </svg>
-          <span className={styles.logoText}>MDGA</span>
+          {/* Default = MDGA. If the logged-in user's main is Alliance, show
+              the MEGA logo instead (auth/me returns mainFaction). */}
+          {(() => {
+            const isAlliance = isLoggedIn && (user?.mainFaction || '').toUpperCase() === 'ALLIANCE';
+            const src = isAlliance ? '/MEGA_Logo.png' : '/MDGA.png';
+            const alt = isAlliance ? 'MEGA' : 'MDGA';
+            return <img src={src} alt={alt} className={styles.logoIcon} />;
+          })()}
+          <span className={styles.logoText}>
+            {isLoggedIn && (user?.mainFaction || '').toUpperCase() === 'ALLIANCE' ? 'MEGA' : 'MDGA'}
+          </span>
         </Link>
 
         <ul className={`${styles.links} ${menuOpen ? styles.linksOpen : ''}`}>
@@ -59,8 +64,13 @@ export default function Nav() {
             </Link>
           </li>
           <li>
+            <Link to="/events" className={`${styles.link} ${isActive('/events') ? styles.linkActive : ''}`}>
+              Events
+            </Link>
+          </li>
+          <li>
             <Link to="/story" className={`${styles.link} ${isActive('/story') ? styles.linkActive : ''}`}>
-              Our Story
+              Story
             </Link>
           </li>
           <li>
@@ -68,26 +78,33 @@ export default function Nav() {
               Leadership
             </Link>
           </li>
+          {isLoggedIn && (
+            <li>
+              <Link to="/forum" className={`${styles.link} ${isActive('/forum') ? styles.linkActive : ''}`}>
+                Forum
+              </Link>
+            </li>
+          )}
+          {/* Leaderboards is public read; anonymized for non-members. */}
           <li>
-            <Link to="/events" className={`${styles.link} ${isActive('/events') ? styles.linkActive : ''}`}>
-              Events
+            <Link to="/leaderboards" className={`${styles.link} ${isActive('/leaderboards') ? styles.linkActive : ''}`}>
+              Leaderboards
             </Link>
           </li>
 
-          {isLoggedIn && (
-            <>
-              <li>
-                <Link to="/forum" className={`${styles.link} ${isActive('/forum') ? styles.linkActive : ''}`}>
-                  Forum
-                </Link>
-              </li>
-              <li>
-                <Link to="/leaderboards" className={`${styles.link} ${isActive('/leaderboards') ? styles.linkActive : ''}`}>
-                  Leaderboards
-                </Link>
-              </li>
-            </>
-          )}
+          <li>
+            {/* External: opens the Fourthwall storefront in a new tab.
+                Public — no auth required. Sits after Leaderboards for
+                logged-in users; still visible to logged-out users. */}
+            <a
+              href="https://make-durotar-great-again-shop.fourthwall.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.link}
+            >
+              Merch
+            </a>
+          </li>
 
           {/* Auth-dependent links */}
           {isLoggedIn ? (
@@ -98,7 +115,7 @@ export default function Nav() {
                 aria-haspopup="true"
                 aria-expanded={userOpen}
               >
-                <span className={`rank-badge rank-badge--${user.rank}`}>{user.rank}</span>
+                <span className={`rank-badge rank-badge--${user.rank}`}>{user.displayRank || user.display_rank || user.rank}</span>
                 {user.displayName || user.display_name || user.username}
               </button>
               <div className={`${styles.userDropdown} ${userOpen ? styles.userDropdownVisible : ''}`}>
@@ -114,7 +131,10 @@ export default function Nav() {
           ) : (
             <>
               <li>
-                <Link to="/join" className={`${styles.link} ${styles.linkCta}`}>
+                <Link
+                  to="/join"
+                  className={`${styles.link} ${styles.linkCta} ${isActive('/join') ? styles.linkActive : ''}`}
+                >
                   Join Us
                 </Link>
               </li>

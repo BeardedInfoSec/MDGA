@@ -1,128 +1,346 @@
 import { Link } from 'react-router-dom';
+import { useEffect, useState, useRef } from 'react';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
-import PageHero from '../../components/common/PageHero';
 import styles from './Story.module.css';
 
-const TIMELINE = [
+// Canonical lore — keep `<MAKE DUROTAR GREAT AGAIN>` and other guild tags
+// in plain strings (they render fine in React without escaping).
+const CHAPTERS = [
   {
-    date: 'Late 2024',
-    title: 'The Return to Durotar',
-    text: 'GM Cawkadoodle returned to World of Warcraft after a break, excited to revisit Durotar \u2014 once a vibrant hub for dueling and hanging out while waiting for queues. But something was wrong. Durotar was empty. The Horde was gone.',
+    number: 'I',
+    title: 'The Founding',
+    paragraphs: [
+      '<MAKE DUROTAR GREAT AGAIN> was founded on January 1st, 2025 by Blood Death Knight Cawkadoodle and his newly acquainted best pal, Druzak.',
+      'In the very beginning, Cawkadoodle had just returned to the game since Dragonflight and was confused as to why Durotar was always empty — and full of Alliance. A place he once enjoyed dueling, hanging out, and waiting in queues was now lifeless and occupied by an Alliance guild known as <The Playas Club>.',
+      'After several weeks of attempting to sit in Durotar peacefully, Cawkadoodle was fed up with the constant ganking, follower queue abuse, and various other exploits used by <The Playas Club>. Enough was enough.',
+    ],
+    pullQuote: 'Camped at the graveyard for 5 hours straight. Over 300 deaths. He refused to leave.',
+    image: '/images/org_images/Part%201.png',
+    imageAlt: 'Cawkadoodle camped at the Durotar graveyard',
   },
   {
-    date: 'Late 2024',
-    title: 'The Alliance Occupation',
-    text: 'Cawkadoodle discovered that Durotar was being occupied and camped by an Alliance guild called <The Playas Club>. One night, TPC showed up and camped him at the graveyard for 5 hours straight \u2014 over 300 deaths. For hours, the little Blood DK kept respawning with rez sickness, getting farmed over and over.',
-    image: '/images/image4.png',
-    imageAlt: 'Alliance forces occupying Durotar',
+    number: 'II',
+    title: 'Meeting Druzak',
+    paragraphs: [
+      'The next day, he met a hunter named Druzak. He seemed to be the only other person in all of Durotar actually attempting to fight back. Cawkadoodle messaged Druzak and asked if he could join the guild he was in called <Laughing Coffins>.',
+      'Once friends, now enemies — an invite was sent and accepted. A few days later, Druzak and Cawkadoodle asked <Laughing Coffins> for help in Durotar. They originally helped for a while, but they were a Moon Guard guild and soon had no continued interest in fighting for the sands.',
+      'After some time of Druzak and Cawkadoodle once again being alone fighting back in Durotar, Cawkadoodle asked for invitation permissions in <Laughing Coffins>. They accepted.',
+    ],
+    image: '/images/org_images/Part%202.png',
+    imageAlt: 'Cawkadoodle and Druzak meeting in Durotar',
   },
   {
-    date: 'January 2025',
-    title: 'A Hunter Named Druzak',
-    text: 'The next day, Cawkadoodle met a hunter named Druzak \u2014 the only other person in all of Durotar actually trying to fight back. Druzak was in a guild called <Laughing Coffins>, and Cawkadoodle asked for an invite. He was accepted.',
+    number: 'III',
+    title: 'Forming MDGA',
+    paragraphs: [
+      'The following week, over one hundred people were recruited into <Laughing Coffins> from Tichondrius to fight back. This caused internal issues. There was now a sub-community from Tichondrius within <Laughing Coffins> that wanted to fight for Durotar, while the majority from Moon Guard did not.',
+      'The Moon Guard members complained about anyone asking for World PvP in Durotar — which eventually led to <Laughing Coffins> stripping Cawkadoodle of his invitation permissions. The next day, he left.',
+      'He went to Druzak and asked if he would be interested in starting a guild together. He said yes. That brings us to January 1st, 2025 — the creation of our community known as MDGA. Almost every single Tichondrius recruit followed them to this new community, and others would soon follow.',
+    ],
+    pullQuote: 'January 1st, 2025. The creation of MDGA.',
+    image: '/images/org_images/Part%203.png',
+    imageAlt: 'The founding of MDGA',
   },
   {
-    date: 'January 2025',
-    title: 'Rallying the Horde',
-    text: "When <Laughing Coffins> lost interest in fighting for Durotar, Cawkadoodle asked for invite permissions and began recruiting. He brought in 100+ Tichondrius players who shared one goal: taking Durotar back. But the Moonguard-based guild didn't share the same fire \u2014 the sensitive Moonguardians started complaining about anyone asking for help in Durotar.",
+    number: 'IV',
+    title: 'The First Month',
+    paragraphs: [
+      'The first month of MDGA was not easy. At the time, the Alliance and <The Playas Club> significantly outnumbered us. We went on to lose every major fight. But these were temporary losses — and they shaped us into the war machine we are today.',
+      'New processes were introduced. Standards were put in place. The idea of "Durotar Defense" was created. Discord became a requirement — naturally filtering out non-social players. The community began growing at an unprecedented pace.',
+      'Ranking systems were introduced. Events followed. A stronger sense of community formed around a common purpose.',
+    ],
+    pullQuote: 'Temporary losses shaped us into the war machine we are today.',
+    image: '/images/org_images/Part%204.png',
+    imageAlt: 'MDGA building its war machine in the first month',
   },
   {
-    date: 'January 1, 2025',
-    title: 'MDGA Is Born',
-    text: 'Cawkadoodle whispered Druzak: "Want to start a guild?" Next thing you know, <Make Durotar Great Again> was created. Almost all the original Tichondrius recruits followed them. The flag was planted. The war had begun.',
-    image: '/images/Screenshot_2025-05-27_214251.png',
-    imageAlt: 'Early MDGA guild photo',
+    number: 'V',
+    title: 'The Turning Point',
+    paragraphs: [
+      'As time went on, our numbers grew and we started to make a name for ourselves. Durotar began returning to life — and back to Horde control. The time of Alliance occupation was over. MDGA and the Horde had claimed their home.',
+      'Our success led to the downfall of <The Playas Club>, leaving them as a scattered band of pests who still roam the sands from time to time. But before their fall, <The Playas Club> — often referred to as TPC — called in a new foe: the Ruthless Renegades.',
+      'These enemies were far larger than what we were used to. They employed dishonorable tactics — raiding and leaving the shard as soon as we formed, asking for even-numbered fights then bringing more, and arriving early to scheduled fights.',
+    ],
+    image: '/images/org_images/Part%205.png',
+    imageAlt: 'The turning point — Durotar back under Horde control',
   },
   {
-    date: 'February 2025',
-    title: 'Outnumbered 3 to 1',
-    text: "The first month wasn't easy. The Alliance and <The Playas Club> still outnumbered MDGA 3 to 1, and the guild lost almost every major fight. But Cawkadoodle and Druzak didn't retreat \u2014 they built.",
+    number: 'VI',
+    title: 'MDGA Fights Back',
+    paragraphs: [
+      'MDGA had enough.',
+      'We joined an organization known as the Horde Defense Network, which led to a decisive battle: 150+ Horde vs. 100+ Ruthless Renegades — resulting in Horde victory and proving we were capable of defeating them.',
+      'Shortly after, MDGA chose its own path and left the Horde Defense Network due to social differences. And that was okay. <MAKE DUROTAR GREAT AGAIN> was ready to stand on its own two feet. And we did.',
+      'For the following six months and beyond, Ruthless Renegades took defeat after defeat — with the occasional win — but we knew that if we rallied fully, they would fall.',
+    ],
+    pullQuote: '150+ Horde vs. 100+ Ruthless Renegades. Decisive Horde victory.',
+    image: '/images/org_images/Part%206.png',
+    imageAlt: 'The decisive 150 vs 100 battle in Durotar',
   },
   {
-    date: 'Spring 2025',
-    title: 'Building the War Machine',
-    text: "Processes were added that would shape MDGA into the machine it is today: Discord became a requirement, strengthening the community and weeding out casual players. A ranking system, weekly events, and activity requirements were established. This wasn't a casual guild anymore.",
-  },
-  {
-    date: 'Spring 2025',
-    title: 'The Playas Club Falls',
-    text: 'A month or two later, <The Playas Club> lost over half their player base and became a dead guild with the same 10 people. Meanwhile, Durotar went from absolutely zero people to being packed full of PvPers enjoying the nostalgia of chilling in Durotar, hanging out, and meeting new friends.',
-    image: '/images/3.png',
-    imageAlt: 'Victory screen after defeating The Playas Club',
-  },
-  {
-    date: 'Mid 2025',
-    title: 'Expansion Across Shards',
-    text: "With Tichondrius secured, MDGA expanded onto other Durotar shards \u2014 protecting Area 52, Illidan, and Zul'jin as well, making those servers vibrant with PvP activity too.",
-    image: '/images/image2.png',
-    imageAlt: 'MDGA expanding to new servers',
-  },
-  {
-    date: '2025',
-    title: 'The Battle of Tichondrius',
-    text: "New enemies formed, like Ruthless Renegades, who overwhelmed MDGA with numbers in the early months. But that only helped \u2014 recruitment tripled. The turning point came in a massive 100+ vs 100+ battle in Durotar that resulted in MDGA victory, even temporarily crashing the Tichondrius server.",
-    image: '/images/image1.png',
-    imageAlt: 'The massive 100v100 battle in Durotar',
-  },
-  {
-    date: '2025 \u2014 Present',
-    title: 'The Throne Claimed',
-    text: 'MDGA established itself as one of the most active guilds in North America and has quickly risen to be #1 in total PvP rating. From a New Year\'s Day dream to the top of the continent. The story continues.',
-    image: '/images/highest_shuff_ratig.png',
-    imageAlt: 'Solo Arena 3102 Rating - #1 in NA',
+    number: 'VII',
+    title: 'What Durotar Became',
+    paragraphs: [
+      'In the months following the creation of <MAKE DUROTAR GREAT AGAIN>, Durotar became a place where all Horde could gather — duel, hang out, try new specs, wait for queues, and have a place to call their own. The nostalgia returned. And it was here to stay.',
+      'To this day, <MAKE DUROTAR GREAT AGAIN> continues to expand in every way. From manual audits that once took 4–5 hours to fully automated systems. From little to no rules to a standardized code of conduct. From forming one raid to forming three or more.',
+      'MDGA is now known across the PvP realm. We hold a massive portion of the active PvP player base and continue to grow relentlessly. From casual players to gladiators — MDGA does not discriminate. We hold one common objective: to enjoy what we all love together. PvP.',
+    ],
+    image: '/images/org_images/Part%207.webp',
+    imageAlt: 'What Durotar became — the largest Horde World PvP community',
   },
 ];
 
-export default function Story() {
-  useDocumentTitle('Our Story | MDGA');
+const STATS = [
+  { value: 'Jan 1, 2025', label: 'Founded' },
+  { value: '2,500+', label: 'Members' },
+  { value: '11', label: 'Federation guilds' },
+  { value: '#1', label: 'NA PvP rating' },
+];
 
+// Drop cap on the first character if it's a letter or digit. If the
+// paragraph opens with punctuation (e.g., the `<` of a guild tag like
+// `<MAKE DUROTAR GREAT AGAIN>`), skip the drop cap entirely — otherwise
+// the leading `<` renders as a stray glyph next to the floated drop cap.
+function renderWithDropCap(text) {
+  if (!/^[A-Za-z0-9]/.test(text)) return text;
+  const [letter, ...rest] = text;
   return (
     <>
-      <PageHero title="Our Story" subtitle="From a handful of warriors to the #1 PvP guild in North America" />
+      <span className={styles.dropCap}>{letter}</span>
+      {rest.join('')}
+    </>
+  );
+}
 
-      <section className="section section--darker">
-        <div className="container container--narrow">
-          <p className={styles.intro}>
-            Every great guild has an origin story. Ours began in the red dust of
-            Durotar, where a lone Blood Death Knight dared to fight back against
-            impossible odds and build something that would shake the foundations
-            of Azeroth.
+// IntersectionObserver-driven active chapter highlight for the sidebar.
+// Marks whichever chapter is currently nearest the top of the viewport.
+function useActiveChapter(chapterIds) {
+  const [active, setActive] = useState(chapterIds[0]);
+  const observerRef = useRef(null);
+
+  useEffect(() => {
+    const elements = chapterIds
+      .map((id) => document.getElementById(id))
+      .filter(Boolean);
+    if (elements.length === 0) return undefined;
+
+    const seen = new Map();
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          seen.set(entry.target.id, entry.intersectionRatio);
+        }
+        let bestId = chapterIds[0];
+        let bestRatio = -1;
+        for (const [id, ratio] of seen.entries()) {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestId = id;
+          }
+        }
+        if (bestRatio > 0) setActive(bestId);
+      },
+      { rootMargin: '-30% 0px -55% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] }
+    );
+    elements.forEach((el) => observerRef.current.observe(el));
+    return () => observerRef.current?.disconnect();
+  }, [chapterIds]);
+
+  return active;
+}
+
+// Click-to-enlarge lightbox. ESC or backdrop click closes.
+function Lightbox({ open, src, alt, onClose }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    // Prevent body scroll while open
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className={styles.lightbox} onClick={onClose} role="dialog" aria-modal="true" aria-label={alt}>
+      <button
+        type="button"
+        className={styles.lightboxClose}
+        onClick={onClose}
+        aria-label="Close preview"
+      >
+        ×
+      </button>
+      <img
+        src={src}
+        alt={alt}
+        className={styles.lightboxImage}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+}
+
+export default function Story() {
+  useDocumentTitle('Our Story | MDGA');
+  const chapterIds = CHAPTERS.map((c) => `chapter-${c.number}`);
+  const activeId = useActiveChapter(chapterIds);
+  const [lightbox, setLightbox] = useState(null); // { src, alt } | null
+
+  return (
+    <div className={styles.page}>
+      {/* ── Compact title band (replaces the full-bleed hero) ── */}
+      <header className={styles.titleBand}>
+        <div className={styles.titleBandInner}>
+          <span className={styles.eyebrow}>The MDGA Chronicle</span>
+          <h1 className={styles.pageTitle}>Our Story</h1>
+          <p className={styles.pageSubtitle}>
+            How one stubborn Death Knight, three hundred graveyard deaths, and a refusal
+            to leave Durotar built the largest Horde World PvP community in North America.
           </p>
-        </div>
-      </section>
-
-      <section className="section section--dark">
-        <div className="container">
-          <div className={styles.timeline}>
-            {TIMELINE.map((entry, i) => (
-              <div key={i} className={styles.item}>
-                <div className={styles.node} />
-                <span className={styles.date}>{entry.date}</span>
-                <h3 className={styles.title}>{entry.title}</h3>
-                <p className={styles.text}>{entry.text}</p>
-                {entry.image && (
-                  <div className={styles.image}>
-                    <img src={entry.image} alt={entry.imageAlt} />
-                  </div>
-                )}
+          <div className={styles.statsInline}>
+            {STATS.map((s) => (
+              <div key={s.label} className={styles.statsItem}>
+                <span className={styles.statsValue}>{s.value}</span>
+                <span className={styles.statsLabel}>{s.label}</span>
               </div>
             ))}
           </div>
         </div>
-      </section>
+      </header>
 
-      <section className="section section--darker">
-        <div className="container container--narrow text-center">
-          <h2 className="section-title">The Story Continues</h2>
-          <p className={styles.closing}>
-            There's a lot more to our story, and it's still being written every day.
-            Durotar belongs to the Horde, and MDGA is here to make sure it stays that way.
-          </p>
-          <div className="mt-8">
-            <Link to="/join" className="btn btn--primary btn--lg">Join the Warband</Link>
+      {/* ── Two-column body: sticky chapter nav + chapters ── */}
+      <div className={styles.layout}>
+        <aside className={styles.sidebar} aria-label="Story chapters">
+          <div className={styles.sidebarSticky}>
+            <span className={styles.sidebarLabel}>Chapters</span>
+            <nav className={styles.sidebarNav}>
+              {CHAPTERS.map((chapter) => {
+                const id = `chapter-${chapter.number}`;
+                const isActive = activeId === id;
+                return (
+                  <a
+                    key={chapter.number}
+                    href={`#${id}`}
+                    className={`${styles.sidebarItem} ${isActive ? styles.sidebarItemActive : ''}`}
+                  >
+                    <span className={styles.sidebarItemNum}>{chapter.number}</span>
+                    <span className={styles.sidebarItemTitle}>{chapter.title}</span>
+                  </a>
+                );
+              })}
+              <a
+                href="#ending"
+                className={`${styles.sidebarItem} ${activeId === 'ending' ? styles.sidebarItemActive : ''}`}
+              >
+                <span className={styles.sidebarItemNum}>—</span>
+                <span className={styles.sidebarItemTitle}>Ending</span>
+              </a>
+            </nav>
           </div>
-        </div>
-      </section>
-    </>
+        </aside>
+
+        <main className={styles.content}>
+          {CHAPTERS.map((chapter, idx) => {
+            const imageRight = idx % 2 === 1;
+            return (
+              <article
+                key={chapter.number}
+                id={`chapter-${chapter.number}`}
+                className={`${styles.chapter} ${imageRight ? styles.chapterImageRight : ''}`}
+              >
+                <div className={styles.chapterMedia}>
+                  <button
+                    type="button"
+                    className={styles.chapterImageWrap}
+                    onClick={() => setLightbox({ src: chapter.image, alt: chapter.imageAlt })}
+                    aria-label={`Enlarge: ${chapter.imageAlt}`}
+                  >
+                    <img
+                      src={chapter.image}
+                      alt={chapter.imageAlt}
+                      className={styles.chapterImage}
+                      loading="lazy"
+                    />
+                    <span className={styles.chapterImageZoom} aria-hidden="true">⤢</span>
+                  </button>
+
+                  {chapter.pullQuote && (
+                    <blockquote className={styles.pullQuote}>
+                      <span className={styles.pullQuoteMark} aria-hidden="true">&ldquo;</span>
+                      <p>{chapter.pullQuote}</p>
+                    </blockquote>
+                  )}
+                </div>
+
+                <div className={styles.chapterText}>
+                  <header className={styles.chapterHeader}>
+                    <span className={styles.chapterPart}>Part {chapter.number}</span>
+                    <h2 className={styles.chapterTitle}>{chapter.title}</h2>
+                  </header>
+
+                  {chapter.paragraphs.map((p, i) => (
+                    <p key={i} className={styles.paragraph}>
+                      {i === 0 ? renderWithDropCap(p) : p}
+                    </p>
+                  ))}
+                </div>
+              </article>
+            );
+          })}
+
+          <section id="ending" className={styles.ending}>
+            <button
+              type="button"
+              className={styles.endingFigure}
+              onClick={() => setLightbox({
+                src: '/images/org_images/Ending.png',
+                alt: 'MDGA — the warband that took Durotar back',
+              })}
+              aria-label="Enlarge ending image"
+            >
+              <img
+                src="/images/org_images/Ending.png"
+                alt="MDGA — the warband that took Durotar back"
+                loading="lazy"
+              />
+              <span className={styles.chapterImageZoom} aria-hidden="true">⤢</span>
+            </button>
+
+            <div className={styles.signature}>
+              <p>Thank you for reading.</p>
+              <p className={styles.signatureName}>— GM Cawkadoodle</p>
+              <p className={styles.signatureTitle}>now known as &ldquo;Warchief&rdquo;</p>
+            </div>
+
+            <div className={styles.cta}>
+              <h2 className={styles.ctaTitle}>The story continues.</h2>
+              <p className={styles.ctaSub}>
+                Durotar belongs to the Horde — and MDGA is here to make sure it stays that way.
+              </p>
+              <a
+                href="https://guildsofwow.com/make-durotar-great-again"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--primary"
+              >
+                Join the Warband
+              </a>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <Lightbox
+        open={!!lightbox}
+        src={lightbox?.src}
+        alt={lightbox?.alt}
+        onClose={() => setLightbox(null)}
+      />
+    </div>
   );
 }

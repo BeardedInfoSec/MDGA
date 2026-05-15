@@ -58,48 +58,7 @@ export default function Profile() {
   const [overlaySearching, setOverlaySearching] = useState(false);
   const [overlaySaving, setOverlaySaving] = useState(false);
   const [allowedRealms, setAllowedRealms] = useState([]);
-  const [companionToken, setCompanionToken] = useState('');
-  const [companionIssuedAt, setCompanionIssuedAt] = useState('');
-  const [companionGenerating, setCompanionGenerating] = useState(false);
-  const [companionError, setCompanionError] = useState('');
-  const [companionCopied, setCompanionCopied] = useState(false);
-
-  // Token generation is restricted to Guildmaster rank or any user holding the
-  // `admin.view_panel` permission (matching the server-side gate).
-  const isAdminOrGm = user?.rank === 'guildmaster' || (user?.permissions || []).includes('admin.view_panel');
-  const isOfficerSelf = isOwnProfile && isAdminOrGm;
-
-  const handleGenerateCompanionToken = async () => {
-    setCompanionGenerating(true);
-    setCompanionError('');
-    setCompanionCopied(false);
-    try {
-      const res = await apiFetch('/auth/companion-token', { method: 'POST' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setCompanionError(data.error || `Request failed (${res.status})`);
-        return;
-      }
-      const data = await res.json();
-      setCompanionToken(data.token);
-      setCompanionIssuedAt(data.issuedAt);
-    } catch (err) {
-      setCompanionError(err.message || 'Request failed');
-    } finally {
-      setCompanionGenerating(false);
-    }
-  };
-
-  const handleCopyCompanionToken = async () => {
-    if (!companionToken) return;
-    try {
-      await navigator.clipboard.writeText(companionToken);
-      setCompanionCopied(true);
-      setTimeout(() => setCompanionCopied(false), 2000);
-    } catch (err) {
-      setCompanionError('Couldn’t copy — select the token manually and Ctrl+C.');
-    }
-  };
+  // Companion-token / audit tool moved to Admin → Guild → Audit Tool.
 
   useEffect(() => {
     fetch('/api/config/realms')
@@ -368,98 +327,106 @@ export default function Profile() {
   const faction = (mainChar?.faction || '').toLowerCase();
 
   return (
-    <>
-      <section className={`${styles.hero} ${faction === 'alliance' ? styles.heroAlliance : ''}`}>
-        <div className={`${styles.heroInner} container`}>
-          <div className={styles.heroContent}>
-            <img
-              src={avatarSrc}
-              alt={profileUser.display_name || profileUser.username || 'Profile avatar'}
-              className={styles.avatar}
-            />
-            <div className={styles.heroInfo}>
-              <h1 className={styles.heroName}>{profileUser.display_name || profileUser.username}</h1>
-              <div className={styles.heroMeta}>
-                <span className={`rank-badge rank-badge--${profileUser.rank}`}>{profileUser.rank}</span>
-                {profileUser.discord_username && <span>Discord: {profileUser.discord_username}</span>}
-                <span>Joined {new Date(profileUser.created_at).toLocaleDateString()}</span>
-                {isOwnProfile && (
-                  tzEditing ? (
-                    <select
-                      className={styles.tzSelect}
-                      value={userTimezone}
-                      autoFocus
-                      onChange={(e) => {
-                        updateTimezone(e.target.value);
-                        setTzEditing(false);
-                      }}
-                      onBlur={() => setTzEditing(false)}
-                    >
-                      {getTimezoneOptions().map((t) => (
-                        <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <button
-                      type="button"
-                      className={styles.tzButton}
-                      onClick={() => setTzEditing(true)}
-                      title="Click to change timezone"
-                    >
-                      {userTimezone.replace(/_/g, ' ')}
-                    </button>
-                  )
-                )}
-              </div>
-              <div className={styles.forumStats}>
-                <span className={styles.forumStat}>
-                  <strong>{formatNumber(activity.posts)}</strong> posts
-                </span>
-                <span className={styles.forumStat}>
-                  <strong>{formatNumber(activity.views)}</strong> views
-                </span>
-                <span className={styles.forumStat}>
-                  <strong>{formatNumber(activity.comments)}</strong> comments
-                </span>
-              </div>
+    <div className={styles.page}>
+      <header className={`${styles.titleBand} ${faction === 'alliance' ? styles.titleBandAlliance : ''}`}>
+        <div className={styles.titleBandInner}>
+          <img
+            src={avatarSrc}
+            alt={profileUser.display_name || profileUser.username || 'Profile avatar'}
+            className={styles.titleAvatar}
+          />
+          <div className={styles.titleInfo}>
+            <span className={styles.titleEyebrow}>
+              {isOwnProfile ? 'Your profile' : 'Member profile'}
+            </span>
+            <h1 className={styles.titleName}>{profileUser.display_name || profileUser.username}</h1>
+            <div className={styles.titleMeta}>
+              <span className={`rank-badge rank-badge--${profileUser.rank}`}>{profileUser.display_rank || profileUser.rank}</span>
+              {profileUser.discord_username ? (
+                <span className={styles.titleMetaItem}>Discord: {profileUser.discord_username}</span>
+              ) : null}
+              <span className={styles.titleMetaItem}>
+                Joined {new Date(profileUser.created_at).toLocaleDateString()}
+              </span>
+              {isOwnProfile ? (
+                tzEditing ? (
+                  <select
+                    className={styles.tzSelect}
+                    value={userTimezone}
+                    autoFocus
+                    onChange={(e) => { updateTimezone(e.target.value); setTzEditing(false); }}
+                    onBlur={() => setTzEditing(false)}
+                  >
+                    {getTimezoneOptions().map((t) => (
+                      <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.tzButton}
+                    onClick={() => setTzEditing(true)}
+                    title="Click to change timezone"
+                  >
+                    {userTimezone.replace(/_/g, ' ')}
+                  </button>
+                )
+              ) : null}
+            </div>
+            <div className={styles.titleStatsInline}>
+              <span className={styles.titleStat}>
+                <span className={styles.titleStatValue}>{formatNumber(activity.posts)}</span>
+                <span className={styles.titleStatLabel}>Posts</span>
+              </span>
+              <span className={styles.titleStat}>
+                <span className={styles.titleStatValue}>{formatNumber(activity.comments)}</span>
+                <span className={styles.titleStatLabel}>Comments</span>
+              </span>
+              <span className={styles.titleStat}>
+                <span className={styles.titleStatValue}>{formatNumber(activity.views)}</span>
+                <span className={styles.titleStatLabel}>Views</span>
+              </span>
+              <span className={styles.titleStat}>
+                <span className={styles.titleStatValue}>{characters.length}</span>
+                <span className={styles.titleStatLabel}>{characters.length === 1 ? 'Character' : 'Characters'}</span>
+              </span>
             </div>
           </div>
 
-          {isOwnProfile && (
-            <div className={styles.heroActions}>
+          {isOwnProfile ? (
+            <div className={styles.titleActions}>
               <button
                 type="button"
-                className={`btn btn--sm ${styles.heroAddButton}`}
+                className="btn btn--primary btn--sm"
                 onClick={openAddCharacterOverlay}
               >
                 Add Character
               </button>
             </div>
-          )}
+          ) : null}
         </div>
-      </section>
+      </header>
 
-      <section className="section section--dark">
-        <div className="container">
-          <div className={styles.sectionHead}>
+      <div className={styles.body}>
+        <section>
+          <div className={styles.bodySectionHeader}>
             <div>
-              <h2 className={styles.sectionHeadTitle}>Characters</h2>
-              <p className={styles.sectionHeadDesc}>
-                Click a card to view full stat card details.
-              </p>
+              <span className={styles.bodySectionEyebrow}>Roster</span>
+              <h2 className={styles.bodySectionTitle}>Characters</h2>
+              <p className={styles.bodySectionDesc}>Click a card to flip and view the full stat sheet.</p>
             </div>
-            {isOwnProfile && characters.length > 0 && (
-              <div className={styles.sectionHeadActions}>
+            {isOwnProfile && characters.length > 0 ? (
+              <div>
                 <button
                   className="btn btn--secondary btn--sm"
                   onClick={refreshPvpStats}
                   disabled={refreshing}
                   type="button"
                 >
-                  {refreshing ? 'Refreshing...' : 'Refresh Stats'}
+                  {refreshing ? 'Refreshing…' : 'Refresh Stats'}
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
 
           {characters.length === 0 ? (
@@ -674,68 +641,9 @@ export default function Profile() {
               })}
             </div>
           )}
-        </div>
-      </section>
-
-      {isOfficerSelf && (
-        <section className="section section--dark">
-          <div className="container">
-            <div className={styles.sectionHead}>
-              <div>
-                <h2 className={styles.sectionHeadTitle}>MDGA Audit Tool</h2>
-                <p className={styles.sectionHeadDesc}>
-                  Generate a 90-day token for the desktop audit tool (mdga-audit.exe). Paste it
-                  when the tool prompts. Treat the token like a password.
-                </p>
-              </div>
-              <div className={styles.sectionHeadActions}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleGenerateCompanionToken}
-                  disabled={companionGenerating}
-                >
-                  {companionGenerating ? 'Generating…' : (companionToken ? 'Regenerate Token' : 'Generate Token')}
-                </button>
-              </div>
-            </div>
-
-            {companionError && (
-              <p style={{ color: '#ff6b6b', marginTop: '0.5rem' }}>{companionError}</p>
-            )}
-
-            {companionToken && (
-              <div style={{ marginTop: '1rem' }}>
-                <textarea
-                  readOnly
-                  value={companionToken}
-                  onFocus={(e) => e.target.select()}
-                  rows={4}
-                  style={{
-                    width: '100%',
-                    fontFamily: 'monospace',
-                    fontSize: '0.85rem',
-                    padding: '0.5rem',
-                    background: '#1a1a1a',
-                    color: '#eee',
-                    border: '1px solid #444',
-                    borderRadius: '4px',
-                    wordBreak: 'break-all',
-                  }}
-                />
-                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <button type="button" className="btn btn-secondary" onClick={handleCopyCompanionToken}>
-                    {companionCopied ? 'Copied!' : 'Copy'}
-                  </button>
-                  <span style={{ color: '#888', fontSize: '0.85rem' }}>
-                    Issued {companionIssuedAt ? new Date(companionIssuedAt).toLocaleString() : ''} · expires in 90 days
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
         </section>
-      )}
+
+      </div>{/* /.body */}
 
       {overlayOpen && (
         <div className={styles.overlay}>
@@ -860,6 +768,6 @@ export default function Profile() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

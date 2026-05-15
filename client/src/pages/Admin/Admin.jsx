@@ -3,7 +3,14 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { formatEventTime, utcToLocalInput, getTimezoneOptions } from '../../utils/timezone';
-import PageHero from '../../components/common/PageHero';
+import AdminLayout, { getAdminTabLabel } from './AdminLayout';
+import Overview from './sections/Overview';
+import PeopleMembers from './sections/PeopleMembers';
+import ForumCategoriesAdmin from './sections/ForumCategoriesAdmin';
+import EventScreenshotsModal from './sections/EventScreenshotsModal';
+import AuditToolAdmin from './sections/AuditToolAdmin';
+import AuditLogAdmin from './sections/AuditLogAdmin';
+import RecycleBinAdmin from './sections/RecycleBinAdmin';
 import styles from './Admin.module.css';
 
 const RANK_ORDER = ['recruit', 'member', 'veteran', 'officer', 'guildmaster'];
@@ -84,6 +91,10 @@ const DEFAULT_GUILD_GAP_FILTERS = {
   sort_by: 'overall_last_seen_at',
   sort_dir: 'desc',
   limit: 200,
+  // 'all' = scan every federation guild; 'primary' = primary only;
+  // numeric string = that specific guild_id. Defaults to 'all' so the
+  // gaps report covers the whole federation out of the box.
+  guild_id: 'all',
 };
 const USER_REPORT_VIEW_OPTIONS = [
   { value: 'member_activity', label: 'Member Activity' },
@@ -164,7 +175,7 @@ export default function Admin() {
   useDocumentTitle(gm ? 'Admin Panel' : 'Officer Panel');
 
   // ── Shared state ──
-  const [activeTab, setActiveTab] = useState('events');
+  const [activeTab, setActiveTab] = useState('overview');
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
 
@@ -195,6 +206,7 @@ export default function Admin() {
   const [roles, setRoles] = useState([]);
   const [allPermissions, setAllPermissions] = useState([]);
   const [roleModal, setRoleModal] = useState(null); // null | { mode: 'add' } | { mode: 'edit', role }
+  const [screenshotsEvent, setScreenshotsEvent] = useState(null); // event being managed for screenshots
   const [roleForm, setRoleForm] = useState({ name: '', display_name: '', color: '#ffffff', description: '', discord_role_id: '', permissions: [] });
 
   // ── User Roles state ──
@@ -400,6 +412,11 @@ export default function Admin() {
     if (normalizedFilters.sort_by) params.set('sort_by', normalizedFilters.sort_by);
     if (normalizedFilters.sort_dir) params.set('sort_dir', normalizedFilters.sort_dir);
     if (normalizedFilters.limit) params.set('limit', String(normalizedFilters.limit));
+    // Federation scope. 'primary' = omit param so server uses its primary-only
+    // default. 'all' or numeric ID = pass through (server handles 'all' specially).
+    if (normalizedFilters.guild_id && normalizedFilters.guild_id !== 'primary') {
+      params.set('guild_id', String(normalizedFilters.guild_id));
+    }
     if (exportAll) params.set('export_all', '1');
     return { normalizedFilters, params };
   }, []);
@@ -543,7 +560,26 @@ export default function Admin() {
       ]);
       if (mappingsRes.ok) {
         const data = await mappingsRes.json();
-        setGameRankRosterRanks(data.rosterRanks || []);
+        // Merge federation totals onto each rank entry so the UI can show
+        // "X in this guild · Y in federation" inline. The server returns a
+        // separate federationRanks array we look up by rank number.
+        const federationByRank = {};
+        for (const f of (data.federationRanks || [])) {
+          federationByRank[f.rank] = f.count;
+        }
+        const enrichedRanks = (data.rosterRanks || []).map((r) => ({
+          ...r,
+          federation_count: federationByRank[r.rank] || 0,
+        }));
+        // Also include federation-only ranks (where this guild has 0 members
+        // but other federation guilds have some at that rank).
+        for (const f of (data.federationRanks || [])) {
+          if (!enrichedRanks.some((r) => r.rank === f.rank)) {
+            enrichedRanks.push({ rank: f.rank, count: 0, federation_count: f.count });
+          }
+        }
+        enrichedRanks.sort((a, b) => a.rank - b.rank);
+        setGameRankRosterRanks(enrichedRanks);
         // Build editable state keyed by game_rank
         const state = {};
         for (const m of data.mappings) {
@@ -553,8 +589,8 @@ export default function Admin() {
             game_rank_name: m.game_rank_name || '',
           };
         }
-        // Also ensure all roster ranks have an entry
-        for (const r of data.rosterRanks) {
+        // Also ensure all visible ranks have an entry
+        for (const r of enrichedRanks) {
           if (!state[r.rank]) {
             state[r.rank] = { discord_role_id: '', site_rank: '', game_rank_name: '' };
           }
@@ -696,6 +732,7 @@ export default function Admin() {
     else if (activeTab === 'reports') loadReports(reportFilter);
     else if (activeTab === 'user-reports') {
       loadUserReportPresets();
+      loadTrackedGuilds(); // populate the federation-scope dropdown for the gaps view
       setHasSearchedUserReports(false);
       setUserReportRows([]);
       setUserReportSummary(null);
@@ -707,7 +744,7 @@ export default function Admin() {
       setGuildGapBreakdowns({ by_link_state: [] });
       setGuildGapMeta(null);
     }
-    else if (activeTab === 'roles') { loadRoles(); loadPermissions(); loadGuildProfile(); }
+    else if (activeTab === 'roles') { loadRoles(); loadPermissions(); loadGuildProfile(); loadDiscordGuildRoles(); }
     else if (activeTab === 'user-roles') loadUsers();
     else if (activeTab === 'discord-roles') { loadDiscordGuildRoles(); loadDiscordMappings(); loadRoles(); }
     else if (activeTab === 'guild') { loadGuildProfile(selectedGuildId); loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId); loadTrackedGuilds(); loadBannedUsers(); }
@@ -821,6 +858,25 @@ export default function Admin() {
 
   // ── User handlers ──
   const refreshGuild = () => loadGuildRoster(guildSearch, guildClassFilter, guildRankFilter, guildSort, guildSortOrder, guildPage, guildPageSize, guildBannedFilter, selectedGuildId);
+
+  const toggleRankLock = async (userId, locked) => {
+    try {
+      const res = await apiFetch(`/users/${userId}/rank-lock`, {
+        method: 'PUT',
+        body: JSON.stringify({ locked }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(data.message || (locked ? 'Rank locked' : 'Rank unlocked'));
+        loadUsers();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || 'Failed to toggle rank lock');
+      }
+    } catch {
+      showToast('Failed to toggle rank lock');
+    }
+  };
 
   const changeRank = async (userId, newRank) => {
     try {
@@ -1551,19 +1607,21 @@ export default function Admin() {
     return 'Content';
   };
 
-  // ── Tab definitions ──
+  // ── Tab definitions (kept for backwards-compat with internal references;
+  //     the actual sidebar nav is defined inside AdminLayout) ──
   const tabs = [
+    { id: 'overview', label: 'Overview' },
     { id: 'events', label: 'Events' },
     { id: 'carousel', label: 'Images' },
     { id: 'applications', label: 'Applications' },
     { id: 'reports', label: 'Forum Violations' },
     { id: 'user-reports', label: 'User Reports' },
-    { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'guild', label: 'Guild' },
+    { id: 'game-ranks', label: 'Game Rank Mappings' },
     { id: 'roles', label: 'Roles' },
     ...(gm ? [
       { id: 'user-roles', label: 'User Roles' },
-      { id: 'discord-roles', label: 'Discord Roles' },
+      { id: 'discord-roles', label: 'Discord Role Mappings' },
     ] : []),
   ];
 
@@ -1671,30 +1729,44 @@ export default function Admin() {
   // ── Render ──
   return (
     <>
-      <PageHero title={gm ? 'Admin Panel' : 'Officer Panel'} subtitle="Manage the guild" />
+      <AdminLayout
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        gm={gm}
+        user={user}
+        hasPermission={hasPermission}
+        pageTitle={getAdminTabLabel(activeTab)}
+      >
+        {/* ── Overview Tab (NEW landing) ── */}
+        {activeTab === 'overview' && (
+          <Overview onNavigate={setActiveTab} />
+        )}
 
-      <div className="container section">
-        {/* Tabs */}
-        <div className={styles.tabs}>
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              className={activeTab === t.id ? styles.tabActive : styles.tab}
-              onClick={() => setActiveTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* ── Forum Categories Tab ── */}
+        {activeTab === 'forum-categories' && (
+          <ForumCategoriesAdmin apiFetch={apiFetch} showToast={showToast} />
+        )}
+
+        {/* ── Audit Tool Tab ── */}
+        {activeTab === 'audit-tool' && (
+          <AuditToolAdmin apiFetch={apiFetch} showToast={showToast} />
+        )}
+
+        {/* ── Audit Log Tab ── */}
+        {activeTab === 'audit-log' && (
+          <AuditLogAdmin apiFetch={apiFetch} showToast={showToast} />
+        )}
+
+        {/* ── Recycle Bin Tab ── */}
+        {activeTab === 'recycle-bin' && (
+          <RecycleBinAdmin apiFetch={apiFetch} showToast={showToast} />
+        )}
 
         {/* ── Events Tab ── */}
         {activeTab === 'events' && (
           <div>
-            <div className={styles.header}>
-              <h2>Guild Events</h2>
-              <div className={styles.actions}>
-                <button className="btn btn--primary" onClick={openAddEvent}>Add Event</button>
-              </div>
+            <div className={styles.tabToolbar}>
+              <button className="btn btn--primary btn--sm" onClick={openAddEvent}>Add Event</button>
             </div>
 
             {events.length === 0 ? (
@@ -1703,19 +1775,46 @@ export default function Admin() {
               <div className={styles.eventList}>
                 {events.map((ev) => {
                   const catOpt = CATEGORY_OPTIONS.find((c) => c.value === ev.category);
+                  const accent = CATEGORY_COLORS[ev.category] || 'var(--color-gray-400)';
                   return (
-                    <div key={ev.id} className={styles.eventItem}>
-                      <div className={styles.eventBar} style={{ background: CATEGORY_COLORS[ev.category] || 'var(--color-gray-400)' }} />
+                    <div key={ev.id} className={styles.eventItem} style={{ borderLeftColor: accent }}>
                       <div className={styles.eventInfo}>
-                        <div className={styles.eventTitle}>
-                          {ev.title}
-                          {ev.series_id && <span className={styles.seriesBadge}>{ev.series_index}/{ev.series_total}</span>}
+                        <div className={styles.eventTitleRow}>
+                          <span className={styles.eventTitle}>{ev.title}</span>
+                          <span
+                            className={styles.eventCategoryChip}
+                            style={{ borderColor: accent, color: accent }}
+                          >
+                            {catOpt?.label || ev.category}
+                          </span>
+                          {ev.series_id ? (
+                            <span className={styles.seriesBadge}>{ev.series_index}/{ev.series_total}</span>
+                          ) : null}
                         </div>
-                        <div className={styles.eventMeta}>{ev.starts_at ? formatEventTime(ev.starts_at, ev.timezone || 'America/New_York') : 'Unscheduled'} &middot; {catOpt?.label || ev.category}</div>
+                        <div className={styles.eventMeta}>
+                          {ev.starts_at ? formatEventTime(ev.starts_at, ev.timezone || 'America/New_York') : 'Unscheduled'}
+                        </div>
                       </div>
                       <div className={styles.eventActions}>
+                        {(() => {
+                          // "Screenshots" only useful for events that have happened.
+                          // Use ends_at if present, otherwise starts_at.
+                          const endIso = ev.ends_at || ev.starts_at;
+                          const isPast = endIso ? new Date(endIso.replace(' ', 'T') + 'Z') < new Date() : false;
+                          return isPast ? (
+                            <button
+                              className="btn btn--secondary btn--sm"
+                              onClick={() => setScreenshotsEvent(ev)}
+                              title="Upload + manage recap screenshots"
+                            >
+                              Screenshots
+                            </button>
+                          ) : null;
+                        })()}
                         <button className="btn btn--secondary btn--sm" onClick={() => openEditEvent(ev)}>Edit</button>
-                        {ev.series_id && <button className="btn btn--danger btn--sm" onClick={() => deleteEventSeries(ev.series_id)}>Delete Series</button>}
+                        {ev.series_id ? (
+                          <button className="btn btn--danger btn--sm" onClick={() => deleteEventSeries(ev.series_id)}>Delete Series</button>
+                        ) : null}
                         <button className="btn btn--danger btn--sm" onClick={() => deleteEvent(ev.id)}>Delete</button>
                       </div>
                     </div>
@@ -1729,11 +1828,6 @@ export default function Admin() {
         {/* ── Carousel Tab ── */}
         {activeTab === 'carousel' && (
           <div>
-            <div className={styles.header}>
-              <h2>Images</h2>
-            </div>
-            <p className={styles.desc}>Manage homepage background and carousel images.</p>
-
             <div className={styles.imageManagerPanel}>
               <h3 className={styles.imageManagerTitle}>Home Background</h3>
               <p className={styles.imageManagerHint}>This image is used for the Home background hero/dashboard area.</p>
@@ -1841,9 +1935,8 @@ export default function Admin() {
         {/* ── Applications Tab ── */}
         {activeTab === 'applications' && (
           <div>
-            <div className={styles.header}>
-              <h2>Applications</h2>
-              <div className={styles.actions}>
+            <div className={styles.tabToolbar}>
+              <div className={styles.tabToolbarLeft}>
                 {['pending', 'approved', 'denied'].map((f) => (
                   <button
                     key={f}
@@ -1895,9 +1988,8 @@ export default function Admin() {
         {/* ── Users Tab ── */}
         {activeTab === 'reports' && (
           <div>
-            <div className={styles.header}>
-              <h2>Forum Violations</h2>
-              <div className={styles.actions}>
+            <div className={styles.tabToolbar}>
+              <div className={styles.tabToolbarLeft}>
                 {['open', 'reviewing', 'resolved', 'dismissed'].map((status) => (
                   <button
                     key={status}
@@ -1909,7 +2001,6 @@ export default function Admin() {
                 ))}
               </div>
             </div>
-            <p className={styles.desc}>Moderate reported forum posts and comments from members.</p>
 
             {reports.length === 0 ? (
               <p className={styles.empty}>No {reportFilter} reports.</p>
@@ -2006,60 +2097,63 @@ export default function Admin() {
 
         {activeTab === 'user-reports' && (
           <div className={styles.userReportsSection}>
-            <div className={styles.header}>
-              <h2>User Reports</h2>
-              <div className={styles.actions}>
-                <button
-                  className="btn btn--secondary btn--sm"
-                  onClick={exportCurrentReportCsv}
-                  disabled={isGuildGapView
-                    ? (!hasSearchedGuildGaps || guildGapLoading || reportCsvExporting)
-                    : (!hasSearchedUserReports || userReportLoading || reportCsvExporting)}
+            <div className={styles.userReportTopBar}>
+              <div className={styles.userReportTopBarLeft}>
+                <select
+                  className={styles.userReportViewSelect}
+                  value={userReportView}
+                  onChange={(e) => setUserReportView(normalizeReportView(e.target.value))}
+                  aria-label="Report Type"
                 >
-                  {reportCsvExporting ? 'Exporting...' : 'Export CSV'}
-                </button>
+                  {USER_REPORT_VIEW_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <div className={styles.userReportRangeButtons} role="tablist" aria-label="Activity range">
+                  {USER_REPORT_RANGE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={(isGuildGapView ? guildGapFilters.activity_range : userReportFilters.activity_range) === option.value ? styles.userReportRangeBtnActive : styles.userReportRangeBtn}
+                      onClick={() => (isGuildGapView ? setGuildGapActivityRange(option.value) : setUserReportActivityRange(option.value))}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <button
+                className="btn btn--secondary btn--sm"
+                onClick={exportCurrentReportCsv}
+                disabled={isGuildGapView
+                  ? (!hasSearchedGuildGaps || guildGapLoading || reportCsvExporting)
+                  : (!hasSearchedUserReports || userReportLoading || reportCsvExporting)}
+              >
+                {reportCsvExporting ? 'Exporting...' : 'Export CSV'}
+              </button>
             </div>
-            <p className={styles.desc}>
-              {isGuildGapView
-                ? 'Find guild members missing website/Discord linkage and monitor activity from one place.'
-                : 'Search member data and generate user activity reports.'}
-            </p>
-            <p className={styles.userReportHint}>
-              {isGuildGapView
-                ? 'Tip: set Link State to "All Guild Members" and leave Search blank to audit your full roster.'
-                : 'Tip: leave Search blank and click Generate Report to return all users.'}
-            </p>
 
             <form className={styles.userReportFilters} onSubmit={runUserReport}>
-              <div className={styles.userReportModeRow}>
-                <label className={styles.userReportField}>
-                  <span>Report Type</span>
-                  <select
-                    value={userReportView}
-                    onChange={(e) => setUserReportView(normalizeReportView(e.target.value))}
-                  >
-                    {USER_REPORT_VIEW_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className={styles.userReportRangeButtons}>
-                {USER_REPORT_RANGE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={(isGuildGapView ? guildGapFilters.activity_range : userReportFilters.activity_range) === option.value ? styles.userReportRangeBtnActive : styles.userReportRangeBtn}
-                    onClick={() => (isGuildGapView ? setGuildGapActivityRange(option.value) : setUserReportActivityRange(option.value))}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
               <div className={styles.userReportGrid}>
                 {isGuildGapView ? (
                   <>
+                    <label className={styles.userReportField}>
+                      <span>Federation Scope</span>
+                      <select
+                        value={guildGapFilters.guild_id || 'all'}
+                        onChange={(e) => updateGuildGapFilter('guild_id', e.target.value)}
+                      >
+                        <option value="all">All federation guilds</option>
+                        <option value="primary">Primary guild only</option>
+                        {[...trackedGuilds]
+                          .sort((a, b) => (b.is_primary - a.is_primary) || a.realm_slug.localeCompare(b.realm_slug))
+                          .map((g) => (
+                            <option key={g.id} value={String(g.id)}>
+                              {g.name} — {g.realm_slug}{g.is_primary ? ' (primary)' : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
                     <label className={styles.userReportField}>
                       <span>Search</span>
                       <input
@@ -2249,27 +2343,12 @@ export default function Admin() {
                   </>
                 )}
               </div>
-              <div className={styles.userReportActions}>
-                <button className="btn btn--primary btn--sm" type="submit" disabled={isGuildGapView ? guildGapLoading : userReportLoading}>
-                  {(isGuildGapView ? guildGapLoading : userReportLoading) ? 'Generating...' : 'Generate Report'}
-                </button>
-                <button className="btn btn--secondary btn--sm" type="button" onClick={saveUserReportPreset}>
-                  Save Report
-                </button>
-                <button
-                  className="btn btn--secondary btn--sm"
-                  type="button"
-                  disabled={isGuildGapView ? guildGapLoading : userReportLoading}
-                  onClick={resetUserReportFilters}
-                >
-                  Reset Filters
-                </button>
-              </div>
-              <div className={styles.userReportSavedRow}>
+              <div className={styles.userReportToolbar}>
                 <select
                   className={styles.userReportSavedSelect}
                   value={selectedSavedUserReportId}
                   onChange={(e) => setSelectedSavedUserReportId(e.target.value)}
+                  aria-label="Saved reports"
                 >
                   <option value="">Saved reports...</option>
                   {savedUserReports.map((report) => (
@@ -2284,23 +2363,40 @@ export default function Admin() {
                   disabled={!selectedSavedUserReportId}
                   onClick={() => applySavedUserReportPreset(selectedSavedUserReportId)}
                 >
-                  Load Saved
+                  Load
                 </button>
                 <button
                   className="btn btn--secondary btn--sm"
                   type="button"
                   disabled={!selectedSavedUserReportId || savedReportCsvExporting}
                   onClick={exportSavedUserReportCsv}
+                  title="Export the saved preset's results as CSV"
                 >
-                  {savedReportCsvExporting ? 'Exporting...' : 'Export Saved'}
+                  {savedReportCsvExporting ? '...' : 'Export'}
                 </button>
                 <button
                   className="btn btn--danger btn--sm"
                   type="button"
                   disabled={!selectedSavedUserReportId}
                   onClick={deleteSavedUserReportPreset}
+                  title="Delete saved preset"
                 >
-                  Delete Saved
+                  Delete
+                </button>
+                <span className={styles.userReportToolbarSpacer} />
+                <button
+                  className="btn btn--secondary btn--sm"
+                  type="button"
+                  disabled={isGuildGapView ? guildGapLoading : userReportLoading}
+                  onClick={resetUserReportFilters}
+                >
+                  Reset
+                </button>
+                <button className="btn btn--secondary btn--sm" type="button" onClick={saveUserReportPreset}>
+                  Save
+                </button>
+                <button className="btn btn--primary btn--sm" type="submit" disabled={isGuildGapView ? guildGapLoading : userReportLoading}>
+                  {(isGuildGapView ? guildGapLoading : userReportLoading) ? 'Generating...' : 'Generate Report'}
                 </button>
               </div>
             </form>
@@ -2731,44 +2827,93 @@ export default function Admin() {
         {/* ── Roles Tab ── */}
         {activeTab === 'roles' && (
           <div>
-            <div className={styles.header}>
-              <h2>Roles</h2>
-              <div className={styles.actions}>
-                <button className="btn btn--primary" onClick={openAddRole}>Add Role</button>
-              </div>
+            <div className={styles.tabToolbar}>
+              <button className="btn btn--primary btn--sm" onClick={openAddRole}>Add Role</button>
             </div>
 
             {roles.length === 0 ? (
               <p className={styles.empty}>No roles defined.</p>
             ) : (
-              roles.map((role) => (
-                <div key={role.id} className={styles.roleCard}>
-                  <div className={styles.roleHeader}>
-                    <span className={styles.colorDot} style={{ background: role.color || '#fff' }} />
-                    <strong>{role.display_name}</strong>
-                    <span className={styles.roleName}>@{role.name}</span>
-                    {role.is_default && <span className={styles.defaultBadge}>Default</span>}
-                    {role.discord_role_id && <span className={styles.discordBadge} title={`Discord ID: ${role.discord_role_id}`}>Discord</span>}
-                  </div>
-                  {role.description && <p className={styles.roleDesc}>{role.description}</p>}
-                  {role.permissions && role.permissions.length > 0 && (
-                    <div className={styles.rolePerms}>
-                      {role.permissions.map((p) => {
-                        const key = typeof p === 'string' ? p : p.key_name;
-                        return <span key={key} className={styles.permTag}>{key}</span>;
-                      })}
-                    </div>
-                  )}
-                  <div className={styles.roleActions}>
-                    <button className="btn btn--secondary btn--sm" onClick={() => openEditRole(role)}>Edit</button>
-                    <button className="btn btn--danger btn--sm" onClick={() => deleteRole(role.id)}>Delete</button>
-                  </div>
-                </div>
-              ))
+              <div className={styles.roleList}>
+                {roles.map((role) => {
+                  const permCount = role.permissions?.length || 0;
+                  const discordRole = role.discord_role_id
+                    ? discordGuildRoles.find((dr) => dr.id === role.discord_role_id)
+                    : null;
+                  return (
+                    <details key={role.id} className={styles.roleRow}>
+                      <summary className={styles.roleSummary}>
+                        <span
+                          className={styles.roleSummaryDot}
+                          style={{ background: role.color || 'var(--color-gray-400)' }}
+                        />
+                        <span className={styles.roleSummaryName}>{role.display_name}</span>
+                        <span className={styles.roleSummarySlug}>@{role.name}</span>
+                        {role.is_default ? <span className={styles.defaultBadge}>Default</span> : null}
+                        {discordRole ? (
+                          <span
+                            className={styles.discordBadge}
+                            title={`Auto-assigned from Discord role ID ${role.discord_role_id}`}
+                          >
+                            Discord: @{discordRole.name}
+                          </span>
+                        ) : role.discord_role_id ? (
+                          <span className={styles.syncBadge} title="Discord role not found — was it deleted?">
+                            Discord: @unknown
+                          </span>
+                        ) : (
+                          <span className={styles.syncBadge} title="No Discord role mapped — assign this role manually.">
+                            Manual only
+                          </span>
+                        )}
+                        <span className={styles.roleSummaryCount}>
+                          {permCount} {permCount === 1 ? 'perm' : 'perms'}
+                        </span>
+                        <span className={styles.roleSummaryActions} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            onClick={(e) => { e.preventDefault(); openEditRole(role); }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--sm"
+                            onClick={(e) => { e.preventDefault(); deleteRole(role.id); }}
+                          >
+                            Delete
+                          </button>
+                        </span>
+                      </summary>
+                      <div className={styles.roleDetails}>
+                        {role.description && <p className={styles.roleDesc}>{role.description}</p>}
+                        {permCount > 0 ? (
+                          <div className={styles.rolePerms}>
+                            {role.permissions.map((p) => {
+                              const key = typeof p === 'string' ? p : p.key_name;
+                              return <span key={key} className={styles.permTag}>{key}</span>;
+                            })}
+                          </div>
+                        ) : (
+                          <p className={styles.roleDescMuted}>No permissions assigned.</p>
+                        )}
+                      </div>
+                    </details>
+                  );
+                })}
+              </div>
             )}
 
-            {/* Game Rank Mappings */}
-            {guildProfile && (
+          </div>
+        )}
+
+        {/* ── Game Rank Mappings Tab ── */}
+        {activeTab === 'game-ranks' && (
+          <div>
+            {!guildProfile ? (
+              <p className={styles.empty}>Loading guild profile…</p>
+            ) : (
               <div className={styles.gameRankSection}>
                 <h3 className={styles.gameRankTitle}>Game Rank Mappings</h3>
                 <p className={styles.gameRankDesc}>
@@ -2800,7 +2945,12 @@ export default function Admin() {
                                 value={mapping.game_rank_name}
                                 onChange={(e) => updateGameRankMapping(r.rank, 'game_rank_name', e.target.value)}
                               />
-                              <span className={styles.gameRankCount}>{r.count}</span>
+                              <span
+                                className={styles.gameRankCount}
+                                title={`${r.count} in this guild · ${r.federation_count || 0} across the federation`}
+                              >
+                                {r.count} <span className={styles.gameRankCountFed}>/ {r.federation_count || 0} fed</span>
+                              </span>
                               <select
                                 value={mapping.discord_role_id}
                                 onChange={(e) => updateGameRankMapping(r.rank, 'discord_role_id', e.target.value)}
@@ -2824,8 +2974,7 @@ export default function Admin() {
                         })}
                     </div>
                     <button
-                      className="btn btn--primary"
-                      style={{ marginTop: 'var(--space-4)' }}
+                      className="btn btn--primary btn-spaced"
                       onClick={() => saveGameRankMappings(guildProfile.id)}
                     >
                       Save Mappings
@@ -2839,65 +2988,25 @@ export default function Admin() {
 
         {/* ── User Roles Tab (GM only) ── */}
         {activeTab === 'user-roles' && gm && (
-          <div>
-            <div className={styles.header}>
-              <h2>User Roles</h2>
-            </div>
-
-            <div className={styles.guildFilters}>
-              <input
-                type="text"
-                className={styles.guildSearchInput}
-                placeholder="Search members..."
-                value={userRolesSearch || ''}
-                onChange={(e) => setUserRolesSearch(e.target.value)}
-              />
-            </div>
-
-            {users.length === 0 ? (
-              <p className={styles.empty}>No users found.</p>
-            ) : (
-              <div className={styles.guildRosterTable}>
-                <div className={`${styles.guildRosterHeader} ${styles.userRolesRow}`}>
-                  <span>Name</span>
-                  <span>Username</span>
-                  <span>Rank</span>
-                  <span>Actions</span>
-                </div>
-                {users
-                  .filter((u) => {
-                    if (!userRolesSearch) return true;
-                    const q = userRolesSearch.toLowerCase();
-                    return (u.display_name || '').toLowerCase().includes(q) || u.username.toLowerCase().includes(q);
-                  })
-                  .map((u) => (
-                  <div key={u.id} className={styles.userRolesRow}>
-                    <span>
-                      <Link to={`/profile?id=${u.id}`} className={styles.adminProfileLink}><strong>{u.display_name || u.username}</strong></Link>
-                    </span>
-                    <span className={styles.username}>@{u.username}</span>
-                    <span><span className={`rank-badge rank-badge--${u.rank}`}>{u.rank}</span></span>
-                    <span className={styles.userActions}>
-                      <button className="btn btn--secondary btn--sm" onClick={() => resendInviteEmail(u.id)}>Resend Invite</button>
-                      <button className="btn btn--secondary btn--sm" onClick={() => openUserRoleModal(u)}>Manage Roles</button>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <PeopleMembers
+            apiFetch={apiFetch}
+            showToast={showToast}
+            currentUser={user}
+            onManageRoles={openUserRoleModal}
+          />
         )}
 
-        {/* ── Discord Roles Tab (GM only) ── */}
+        {/* ── Discord Role Mappings Tab (GM only) ── */}
         {activeTab === 'discord-roles' && gm && (
           <div>
-            <div className={styles.header}>
-              <h2>Discord Roles</h2>
-              <div className={styles.actions}>
-                <button className="btn btn--primary" onClick={saveDiscordMappings}>Save Mappings</button>
+            <div className={styles.tabToolbar}>
+              <div className={styles.tabToolbarLeft}>
+                <p className={styles.tabToolbarHint}>
+                  Map Discord roles to site ranks &amp; permissions. Updates sync automatically.
+                </p>
               </div>
+              <button className="btn btn--primary btn--sm" onClick={saveDiscordMappings}>Save Mappings</button>
             </div>
-            <p className={styles.desc}>Map Discord server roles to member ranks and permission roles.</p>
 
             {discordGuildRoles.length === 0 ? (
               <p className={styles.empty}>No Discord roles found. Is the bot connected?</p>
@@ -2946,240 +3055,26 @@ export default function Admin() {
           </div>
         )}
 
-        {/* ── Reconciliation Tab ── */}
-        {activeTab === 'reconciliation' && (
-          <div>
-            <div className={styles.header}>
-              <h2>Guild &harr; Discord Reconciliation</h2>
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={refreshReconSources}
-                  disabled={reconLoading}
-                >
-                  {reconLoading ? 'Refreshing...' : 'Refresh Sources'}
-                </button>
-              </div>
-            </div>
-            {reconLastRefresh && (
-              <p style={{ color: 'var(--color-text-muted, #888)', marginBottom: '1rem' }}>
-                Last refresh: {reconLastRefresh.toLocaleString()}
-              </p>
-            )}
-
-            {/* Summary counters */}
-            {reconGaps.summary && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                {[
-                  ['Total guild members', reconGaps.summary.total_members],
-                  ['Needs Discord link', reconGaps.summary.needs_discord],
-                  ['No site account', reconGaps.summary.no_site_account],
-                  ['Alt without main', reconGaps.summary.alt_without_main],
-                  ['Orphan Discord', reconOrphans.in_discord.length],
-                  ['Users who left Discord', reconOrphans.left_discord.length],
-                  ['Spelling near-matches', reconSpelling.length],
-                ].map(([label, value]) => (
-                  <div key={label} className="card" style={{ padding: '0.75rem' }}>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{value ?? 0}</div>
-                    <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--color-text-muted, #888)' }}>{label}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Paste-ingest box */}
-            <details className="card" style={{ padding: '1rem', marginBottom: '1.5rem' }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ingest addon JSON (officer notes / last-seen)</summary>
-              <p style={{ marginTop: '0.5rem', color: 'var(--color-text-muted, #888)' }}>
-                In-game, open the MDGA addon tools panel and click "Export JSON" (addon v4+), then paste the payload here.
-                Notes and last-seen values will be merged onto the guild_members rows.
-              </p>
-              <textarea
-                value={reconIngestText}
-                onChange={(e) => setReconIngestText(e.target.value)}
-                placeholder='{"guildInfo": {...}, "roster": [...]}'
-                rows={6}
-                style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.85rem' }}
-              />
-              <div style={{ marginTop: '0.5rem' }}>
-                <button type="button" className="btn btn--primary" onClick={ingestAddonPaste} disabled={reconIngestBusy || !reconIngestText.trim()}>
-                  {reconIngestBusy ? 'Ingesting...' : 'Ingest'}
-                </button>
-              </div>
-            </details>
-
-            {/* Category: Needs Discord Link (no_site_account + no_discord_link + discord_not_active) */}
-            {(() => {
-              const buckets = [
-                { key: 'no_site_account', label: 'In guild, no site account' },
-                { key: 'no_discord_link', label: 'In guild, site account, no Discord linked' },
-                { key: 'discord_not_active', label: 'In guild, left Discord (site user suspended)' },
-                { key: 'alt_without_main', label: 'Alt in guild, but user has no main set' },
-              ];
-              const byState = (state) => reconGaps.rows.filter((r) => r.link_state === state);
-              return buckets.map(({ key, label }) => {
-                const rows = byState(key);
-                if (rows.length === 0) return null;
-                return (
-                  <section key={key} className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-                    <h3 style={{ marginTop: 0 }}>{label} <span style={{ color: 'var(--color-text-muted, #888)', fontWeight: 400 }}>({rows.length})</span></h3>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className={styles.table}>
-                        <thead>
-                          <tr>
-                            <th>Character</th>
-                            <th>Rank</th>
-                            <th>Site User</th>
-                            <th>Discord</th>
-                            <th>Officer Note</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((r) => (
-                            <tr key={r.guild_member_id}>
-                              <td>{r.character_name} <span style={{ color: '#888' }}>- {r.realm_slug}</span></td>
-                              <td>{r.guild_rank_name || r.guild_rank}</td>
-                              <td>{r.site_username || <em>—</em>}</td>
-                              <td>{r.discord_username || (r.discord_id ? r.discord_id : <em>—</em>)}</td>
-                              <td style={{ maxWidth: 200, fontSize: '0.85rem' }}>{r.officer_note || ''}</td>
-                              <td>
-                                <button type="button" className="btn btn--sm btn--secondary" onClick={() => ignoreGuildMember(r.guild_member_id, 30)}>
-                                  Ignore 30d
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                );
-              });
-            })()}
-
-            {/* Category: Orphan Discord members (in Discord, no site account) */}
-            {reconOrphans.in_discord.length > 0 && (
-              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-                <h3 style={{ marginTop: 0 }}>In Discord, no site account <span style={{ color: '#888', fontWeight: 400 }}>({reconOrphans.in_discord.length})</span></h3>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Username</th>
-                        <th>Nickname</th>
-                        <th>Display Name</th>
-                        <th>Joined</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reconOrphans.in_discord.map((r) => (
-                        <tr key={r.discord_id}>
-                          <td>{r.username}</td>
-                          <td>{r.nickname || <em>—</em>}</td>
-                          <td>{r.display_name || <em>—</em>}</td>
-                          <td>{r.joined_at ? new Date(r.joined_at).toLocaleDateString() : ''}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* Category: Users who left Discord */}
-            {reconOrphans.left_discord.length > 0 && (
-              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-                <h3 style={{ marginTop: 0 }}>Site users no longer in Discord <span style={{ color: '#888', fontWeight: 400 }}>({reconOrphans.left_discord.length})</span></h3>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Site User</th>
-                        <th>Discord</th>
-                        <th>Status</th>
-                        <th>Left At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reconOrphans.left_discord.map((r) => (
-                        <tr key={r.user_id}>
-                          <td>{r.display_name || r.username}</td>
-                          <td>{r.discord_username || r.discord_id}</td>
-                          <td>{r.status}</td>
-                          <td>{r.left_at ? new Date(r.left_at).toLocaleDateString() : <em>unknown</em>}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {/* Category: Spelling near-matches */}
-            {reconSpelling.length > 0 && (
-              <section className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-                <h3 style={{ marginTop: 0 }}>Spelling near-matches <span style={{ color: '#888', fontWeight: 400 }}>({reconSpelling.length})</span></h3>
-                <div style={{ overflowX: 'auto' }}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Guild Character</th>
-                        <th>Suggested Site User</th>
-                        <th>Suggested Character</th>
-                        <th>Distance</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reconSpelling.map((r) => (
-                        <tr key={r.guild_member_id}>
-                          <td>{r.guild_character} <span style={{ color: '#888' }}>- {r.realm_slug}</span></td>
-                          <td>{r.suggested_display_name || r.suggested_username}</td>
-                          <td>{r.suggested_character}</td>
-                          <td>{r.distance}</td>
-                          <td>
-                            <button type="button" className="btn btn--sm btn--primary" onClick={() => linkGuildMember(r.guild_member_id, r.suggested_user_id)}>
-                              Link
-                            </button>
-                            {' '}
-                            <button type="button" className="btn btn--sm btn--secondary" onClick={() => ignoreGuildMember(r.guild_member_id, 90)}>
-                              Ignore 90d
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            {!reconLoading && reconGaps.rows.length === 0 && reconOrphans.in_discord.length === 0 && reconOrphans.left_discord.length === 0 && reconSpelling.length === 0 && (
-              <p style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>
-                No reconciliation issues detected. Everything looks aligned.
-              </p>
-            )}
-          </div>
-        )}
 
         {/* ── Guild Tab ── */}
         {activeTab === 'guild' && (
           <div>
             {/* Federation guild selector — defaults to primary */}
             {trackedGuilds.length > 1 && (
-              <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <label htmlFor="guild-selector" style={{ color: '#aaa' }}>Viewing:</label>
+              <div className={styles.guildSelectorBar}>
+                <label htmlFor="guild-selector" className={styles.guildSelectorLabel}>Viewing</label>
                 <select
                   id="guild-selector"
-                  value={selectedGuildId || ''}
-                  onChange={(e) => setSelectedGuildId(e.target.value ? parseInt(e.target.value, 10) : null)}
-                  style={{
-                    background: '#1a1a1a', color: '#eee', border: '1px solid #444',
-                    borderRadius: '4px', padding: '0.4rem 0.6rem', minWidth: '320px',
+                  className={styles.guildSelector}
+                  value={selectedGuildId === 'all' ? 'all' : (selectedGuildId || '')}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === 'all') setSelectedGuildId('all');
+                    else if (v) setSelectedGuildId(parseInt(v, 10));
+                    else setSelectedGuildId(null);
                   }}
                 >
+                  <option value="all">All federation guilds (aggregate)</option>
                   <option value="">Primary (default)</option>
                   {[...trackedGuilds]
                     .sort((a, b) => (b.is_primary - a.is_primary) || a.realm_slug.localeCompare(b.realm_slug))
@@ -3190,7 +3085,7 @@ export default function Admin() {
                       </option>
                     ))}
                 </select>
-                <span style={{ color: '#666', fontSize: '0.85rem' }}>
+                <span className={styles.guildSelectorCount}>
                   {trackedGuilds.length} federation guilds tracked
                 </span>
               </div>
@@ -3235,7 +3130,8 @@ export default function Admin() {
               </div>
             )}
 
-            {/* Search & Filters */}
+            {/* Search & Filters — class pills collapsed into a dropdown so the
+                filter bar stays one line even with 11 WoW classes. */}
             <div className={styles.guildFilters}>
               <input
                 type="text"
@@ -3244,27 +3140,22 @@ export default function Admin() {
                 value={guildSearch}
                 onChange={(e) => setGuildSearch(e.target.value)}
               />
-              <div className={styles.actions}>
-                <button
-                  className={guildClassFilter === '' ? styles.appFilterActive : styles.appFilter}
-                  onClick={() => setGuildClassFilter('')}
-                >
-                  All
-                </button>
+              <select
+                className={styles.guildFilterSelect}
+                value={guildClassFilter}
+                onChange={(e) => setGuildClassFilter(e.target.value)}
+                aria-label="Filter by class"
+              >
+                <option value="">All classes</option>
                 {guildClassCounts.map((c) => (
-                  <button
-                    key={c.class}
-                    className={guildClassFilter === c.class ? styles.appFilterActive : styles.appFilter}
-                    onClick={() => setGuildClassFilter(c.class)}
-                  >
+                  <option key={c.class} value={c.class}>
                     {c.class} ({c.count})
-                  </button>
+                  </option>
                 ))}
-              </div>
+              </select>
               <button
-                className={guildBannedFilter ? styles.appFilterActive : styles.appFilter}
+                className={guildBannedFilter ? styles.bannedFilterActive : styles.appFilter}
                 onClick={() => setGuildBannedFilter((v) => !v)}
-                style={guildBannedFilter ? { background: 'var(--color-red)', borderColor: 'var(--color-red)', color: '#fff' } : {}}
               >
                 Banned Only
               </button>
@@ -3413,7 +3304,7 @@ export default function Admin() {
 
           </div>
         )}
-      </div>
+      </AdminLayout>
 
       {/* ── Event Modal ── */}
       {eventModal && (
@@ -3553,6 +3444,15 @@ export default function Admin() {
       )}
 
       {/* ── Role Modal ── */}
+      {screenshotsEvent && (
+        <EventScreenshotsModal
+          event={screenshotsEvent}
+          apiFetch={apiFetch}
+          showToast={showToast}
+          onClose={() => setScreenshotsEvent(null)}
+        />
+      )}
+
       {roleModal && (
         <div className={styles.modalOverlay} onClick={() => setRoleModal(null)}>
           <div className={styles.modalWide} onClick={(e) => e.stopPropagation()}>
@@ -3589,12 +3489,32 @@ export default function Admin() {
                   />
                 </div>
                 <div className={`${styles.formGroup} ${styles.formGroupGrow}`}>
-                  <label>Discord Role ID</label>
-                  <input
-                    type="text"
-                    value={roleForm.discord_role_id}
-                    onChange={(e) => setRoleForm((f) => ({ ...f, discord_role_id: e.target.value }))}
-                  />
+                  <label>Auto-assign from Discord role</label>
+                  {discordGuildRoles.length === 0 ? (
+                    <input
+                      type="text"
+                      value={roleForm.discord_role_id}
+                      onChange={(e) => setRoleForm((f) => ({ ...f, discord_role_id: e.target.value }))}
+                      placeholder="Discord roles unavailable — paste ID manually if needed"
+                    />
+                  ) : (
+                    <select
+                      value={roleForm.discord_role_id || ''}
+                      onChange={(e) => setRoleForm((f) => ({ ...f, discord_role_id: e.target.value }))}
+                    >
+                      <option value="">None — assign manually only</option>
+                      {[...discordGuildRoles]
+                        .sort((a, b) => (b.position || 0) - (a.position || 0))
+                        .map((dr) => (
+                          <option key={dr.id} value={dr.id}>
+                            {dr.name}{dr.managed ? ' (bot-managed)' : ''}
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                  <small className={styles.fieldHint}>
+                    Members with this Discord role will get this site role automatically. Pick &ldquo;None&rdquo; for site-only roles.
+                  </small>
                 </div>
               </div>
 

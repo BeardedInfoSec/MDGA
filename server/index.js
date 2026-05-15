@@ -98,6 +98,7 @@ app.use('/api/carousel', require('./routes/carousel'));
 app.use('/api/addon', require('./routes/addon'));
 app.use('/api/config', require('./routes/config'));
 app.use('/api/reconciliation', require('./routes/reconciliation'));
+app.use('/api/admin', require('./routes/admin'));
 
 // React SPA: serve client/dist if the build exists.
 const REACT_DIST = path.join(APP_ROOT, 'client', 'dist');

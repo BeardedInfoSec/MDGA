@@ -27,7 +27,8 @@ router.get('/', requireAuth, async (req, res) => {
         SELECT fp.id, fp.title, fp.category_id, fp.created_at, fp.view_count,
           fp.content,
           fc.name AS category_name,
-          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank,
+          fc.age_restricted AS category_age_restricted,
+          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
           (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes
         FROM forum_posts fp
@@ -35,7 +36,7 @@ router.get('/', requireAuth, async (req, res) => {
         JOIN users u ON u.id = fp.user_id
         WHERE fc.officer_only = 0
         ORDER BY fp.created_at DESC
-        LIMIT 10
+        LIMIT 20
       `),
       pool.execute(`
         SELECT e.id, e.title,
@@ -52,7 +53,7 @@ router.get('/', requireAuth, async (req, res) => {
       `, [userId]),
       pool.execute(`
         SELECT fp.id, fp.title, fp.created_at, fp.content,
-          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank,
+          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
           (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes,
           fp.view_count

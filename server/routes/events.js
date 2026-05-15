@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { DateTime } = require('luxon');
 const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
+const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
 
 const router = express.Router();
 const VALID_EVENT_CATEGORIES = new Set(['pvp', 'defense', 'social', 'raid']);
@@ -56,11 +57,38 @@ router.get('/', async (req, res) => {
              DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
              e.series_id, e.series_index, e.series_total,
         (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'going') AS rsvp_going,
-        (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'maybe') AS rsvp_maybe
+        (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'maybe') AS rsvp_maybe,
+        (SELECT COUNT(*) FROM event_screenshots s WHERE s.event_id = e.id) AS screenshot_count
       FROM events e
       WHERE e.starts_at IS NOT NULL
       ORDER BY e.starts_at ASC
     `);
+
+    // Attach the first 8 going-RSVP users per event for the avatar stack on
+    // the event card. Single batched query to avoid N+1 over large lists.
+    if (rows.length > 0) {
+      const ids = rows.map((r) => r.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const [going] = await pool.execute(
+        `SELECT er.event_id, u.id, u.username, u.display_name, u.avatar_url
+         FROM event_rsvps er
+         JOIN users u ON u.id = er.user_id
+         WHERE er.event_id IN (${placeholders}) AND er.status = 'going'
+         ORDER BY er.created_at ASC`,
+        ids
+      );
+      const goingByEvent = new Map();
+      for (const g of going) {
+        const arr = goingByEvent.get(g.event_id) || [];
+        if (arr.length < 8) {
+          arr.push({ id: g.id, username: g.username, display_name: g.display_name, avatar_url: g.avatar_url });
+        }
+        goingByEvent.set(g.event_id, arr);
+      }
+      for (const event of rows) {
+        event.going_users = goingByEvent.get(event.id) || [];
+      }
+    }
 
     // If authenticated, fetch user's RSVPs and attach to events
     if (userId) {
@@ -337,5 +365,95 @@ router.get('/:id/rsvps', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch RSVPs' });
   }
 });
+
+// ── Event screenshots ───────────────────────────────────────────────
+// Per-event recap galleries. Officers (or anyone with events.manage)
+// upload screenshots after an event ends; the public Events page renders
+// them as a thumbnail strip + lightbox under the past-events section.
+
+// GET /api/events/:id/screenshots — public list
+router.get('/:id/screenshots', async (req, res) => {
+  try {
+    const eventId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(eventId) || eventId <= 0) {
+      return res.status(400).json({ error: 'Invalid event id' });
+    }
+    const [rows] = await pool.execute(
+      `SELECT s.id, s.url, s.caption,
+              DATE_FORMAT(s.uploaded_at, '%Y-%m-%d %H:%i:%s') AS uploaded_at,
+              s.uploaded_by, u.username AS uploaded_by_username, u.display_name AS uploaded_by_name
+       FROM event_screenshots s
+       LEFT JOIN users u ON u.id = s.uploaded_by
+       WHERE s.event_id = ?
+       ORDER BY s.uploaded_at ASC`,
+      [eventId]
+    );
+    res.json({ screenshots: rows });
+  } catch (err) {
+    console.error('Get screenshots error:', err);
+    res.status(500).json({ error: 'Failed to fetch screenshots' });
+  }
+});
+
+// POST /api/events/:id/screenshots — upload one screenshot (multipart)
+// Field name: "image". Optional caption in the form body.
+router.post(
+  '/:id/screenshots',
+  requireAuth,
+  requirePermission('events.manage'),
+  uploadSingleImage.single('image'),
+  async (req, res) => {
+    try {
+      const eventId = parseInt(req.params.id, 10);
+      if (!Number.isInteger(eventId) || eventId <= 0) {
+        return res.status(400).json({ error: 'Invalid event id' });
+      }
+      const [eventRow] = await pool.execute('SELECT id FROM events WHERE id = ?', [eventId]);
+      if (eventRow.length === 0) return res.status(404).json({ error: 'Event not found' });
+
+      if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+
+      const filename = await saveValidatedImage(req.file);
+      const url = `/uploads/${filename}`;
+      const caption = (req.body?.caption || '').trim().slice(0, 255) || null;
+
+      const [result] = await pool.execute(
+        'INSERT INTO event_screenshots (event_id, url, caption, uploaded_by) VALUES (?, ?, ?, ?)',
+        [eventId, url, caption, req.user.id]
+      );
+      res.status(201).json({ id: result.insertId, url, caption, uploaded_by: req.user.id });
+    } catch (err) {
+      console.error('Upload screenshot error:', err);
+      res.status(500).json({ error: err.message || 'Failed to upload screenshot' });
+    }
+  }
+);
+
+// DELETE /api/events/:id/screenshots/:sid
+router.delete(
+  '/:id/screenshots/:sid',
+  requireAuth,
+  requirePermission('events.manage'),
+  async (req, res) => {
+    try {
+      const eventId = parseInt(req.params.id, 10);
+      const sid = parseInt(req.params.sid, 10);
+      if (!Number.isInteger(eventId) || !Number.isInteger(sid)) {
+        return res.status(400).json({ error: 'Invalid id' });
+      }
+      const [result] = await pool.execute(
+        'DELETE FROM event_screenshots WHERE id = ? AND event_id = ?',
+        [sid, eventId]
+      );
+      if (result.affectedRows === 0) return res.status(404).json({ error: 'Screenshot not found' });
+      // Note: we don't currently delete the file from disk — fine for now,
+      // if storage fills up we'll add a sweeper. Same pattern as carousel.
+      res.json({ message: 'Screenshot deleted' });
+    } catch (err) {
+      console.error('Delete screenshot error:', err);
+      res.status(500).json({ error: 'Failed to delete screenshot' });
+    }
+  }
+);
 
 module.exports = router;

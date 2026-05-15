@@ -1,206 +1,718 @@
-/* Leader Feature */
-.leaderFeature {
-  display: flex;
-  gap: var(--space-12);
-  align-items: center;
-}
+/* ──────────────────────────────────────────────────────────────────────
+ * Leadership page — same docs-style compact layout as Story:
+ *
+ *   Compact title band (eyebrow / title / subtitle / inline stats)
+ *   →  Two-column body (sticky sidebar TOC + content column)
+ *   →  Leader spreads (image + achievements caption | bio paragraphs)
+ *   →  Rank Structure grid
+ *   →  Warband image grid (click-to-enlarge)
+ * ──────────────────────────────────────────────────────────────────── */
 
-.leaderFeatureReversed {
-  composes: leaderFeature;
-  flex-direction: row-reverse;
-}
-
-.leaderImage {
-  flex: 0 0 400px;
-  max-width: 400px;
-  position: relative;
-}
-
-.leaderImage img {
-  width: 100%;
-  height: auto;
-  border-radius: var(--border-radius-md);
-  border: 2px solid var(--color-gray-700);
-  box-shadow: var(--shadow-card);
-}
-
-.classBadge {
-  position: absolute;
-  bottom: var(--space-4);
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--border-radius-sm);
-  backdrop-filter: blur(8px);
-}
-
-.classBadgeDk {
-  composes: classBadge;
-  background: rgba(196, 30, 58, 0.85);
-  color: #FFC0CB;
-  border: 1px solid #C41E3A;
-}
-
-.classBadgeHunter {
-  composes: classBadge;
-  background: rgba(170, 211, 114, 0.2);
-  color: #AAD372;
-  border: 1px solid #AAD372;
-}
-
-.classBadgePriest {
-  composes: classBadge;
-  bottom: auto;
-  top: var(--space-4);
-  background: rgba(255, 255, 255, 0.15);
-  color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-}
-
-.leaderInfo {
-  flex: 1;
-}
-
-.rank {
-  font-family: var(--font-ui);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 3px;
-  color: var(--color-red-light);
-  display: block;
-  margin-bottom: var(--space-2);
-}
-
-.name {
-  font-family: var(--font-display);
-  font-size: var(--font-size-4xl);
-  color: var(--color-gold);
-  margin-bottom: var(--space-3);
-}
-
-.classLabel {
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-6);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.classColorDk {
-  color: #C41E3A;
-}
-
-.classColorHunter {
-  color: #AAD372;
-}
-
-.classColorPriest {
-  color: #FFFFFF;
-}
-
-.subtitle {
-  font-family: var(--font-ui);
-  font-size: var(--font-size-base);
-  font-style: italic;
-  color: var(--color-gold);
-  margin-bottom: var(--space-6);
-}
-
-.bio {
-  color: var(--color-text-secondary);
-  line-height: var(--line-height-loose);
-  margin-bottom: var(--space-6);
-  font-size: var(--font-size-lg);
-}
-
-.achievements {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  list-style: none;
-}
-
-.achievements li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
+.page {
+  /* transparent so site-wide bg image shows through */ background: transparent;
   color: var(--color-text-primary);
 }
 
-.achievements li::before {
-  content: '\2726';
-  color: var(--color-gold);
-  font-size: var(--font-size-base);
+/* ── Compact title band ── */
+.titleBand {
+  background: var(--color-black-soft);
+  border-bottom: 1px solid var(--color-gold-dark);
+  padding: var(--space-8) var(--space-6) var(--space-6) var(--space-6);
 }
 
-/* Rank Cards */
-.rankCard {
+.titleBandInner {
+  max-width: 1400px;
+  margin: 0 auto;
   text-align: center;
-  border-top: 3px solid var(--color-gold);
 }
 
-.rankCard h3 {
+.eyebrow {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 5px;
+  color: var(--color-gold);
   margin-bottom: var(--space-2);
-  font-size: var(--font-size-xl);
+  padding: 3px 10px;
+  border: 1px solid var(--color-gold-dark);
 }
 
-.rankCard p {
-  color: var(--color-text-secondary);
+.pageTitle {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-shadow: 0 0 24px rgba(212, 175, 55, 0.25);
+}
+
+.pageSubtitle {
+  font-family: var(--font-body);
   font-size: var(--font-size-base);
+  line-height: 1.55;
+  color: var(--color-parchment);
+  margin: var(--space-3) auto 0 auto;
+  max-width: 720px;
+  font-style: italic;
 }
 
-/* Image Frame */
-.imageFrame {
-  border-radius: var(--border-radius-md);
-  overflow: hidden;
-  border: 2px solid var(--color-gray-700);
-  box-shadow: var(--shadow-card);
+.statsInline {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin-top: var(--space-5);
+  flex-wrap: wrap;
 }
 
-.imageFrame img {
-  width: 100%;
-  height: auto;
+.statsItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-5);
+  border-right: 1px solid var(--color-gray-800);
+}
+
+.statsItem:last-child { border-right: none; }
+
+.statsValue {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  color: var(--color-gold);
+  line-height: 1;
+}
+
+.statsLabel {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Two-column layout ── */
+.layout {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-6);
+}
+
+/* ── Sidebar ── */
+.sidebar { position: relative; }
+
+.sidebarSticky {
+  position: sticky;
+  top: calc(var(--nav-height, 70px) + var(--space-4));
+}
+
+.sidebarLabel {
   display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-gray-800);
 }
 
-.imageCaption {
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-gray-900);
+.sidebarNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  text-align: center;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
 
-@media (max-width: 768px) {
-  .leaderFeature,
-  .leaderFeatureReversed {
-    flex-direction: column;
+.sidebarItem:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebarItemActive {
+  color: var(--color-gold);
+  border-left-color: var(--color-gold);
+  background: rgba(212, 175, 55, 0.05);
+}
+
+.sidebarItemNum {
+  font-family: var(--font-display);
+  font-size: var(--font-size-sm);
+  color: var(--color-gold-dark);
+  flex-shrink: 0;
+  width: 18px;
+  text-align: right;
+}
+
+.sidebarItemActive .sidebarItemNum { color: var(--color-gold); }
+
+.sidebarItemTitle {
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Content column ── */
+.content { min-width: 0; }
+
+/* ── Leader spread ── */
+.leader {
+  display: grid;
+  grid-template-columns: 38% 62%;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--color-gray-800);
+  scroll-margin-top: calc(var(--nav-height, 70px) + var(--space-3));
+}
+
+.leader:last-of-type { border-bottom: none; }
+.leader.leaderImageRight .leaderMedia { order: 2; }
+
+.leaderMedia {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.leaderImageWrap {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+  padding: 0;
+  cursor: zoom-in;
+  display: block;
+  width: 100%;
+}
+
+.leaderImageWrap:hover { border-color: var(--color-gold-dark); }
+.leaderImageWrap:hover .leaderImageZoom { opacity: 1; }
+.leaderImageWrap:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.leaderImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.leaderImageWrap:hover .leaderImage { transform: scale(1.02); }
+
+.leaderImageZoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-gold);
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+/* Achievements: caption-style block sitting under the bio in the text column */
+.achievements {
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02));
+  border: 1px solid var(--color-gray-800);
+  border-left: 2px solid var(--color-gold);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.achievementsLabel {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+}
+
+.achievements ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  list-style: '— ';
+}
+
+.achievements li {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+}
+
+.achievements li:last-child { margin-bottom: 0; }
+
+/* ── Leader text ── */
+.leaderText {
+  display: flex;
+  flex-direction: column;
+}
+
+.leaderHeader {
+  margin-bottom: var(--space-3);
+}
+
+.leaderRank {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-red-light);
+  margin-bottom: 4px;
+}
+
+.leaderName {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 2.8vw, 2.2rem);
+  color: var(--color-gold);
+  margin: 0 0 var(--space-2) 0;
+  line-height: 1.05;
+}
+
+/* ── Class chip (replaces the old class label + symbol) ── */
+.classChip {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  border-radius: var(--border-radius-sm);
+}
+
+/* WoW class colors */
+.classChip_dk     { background: rgba(196, 30, 58, 0.18);  color: #FF7B91; border: 1px solid #C41E3A; }
+.classChip_hunter { background: rgba(170, 211, 114, 0.15); color: #AAD372; border: 1px solid #AAD372; }
+.classChip_priest { background: rgba(255, 255, 255, 0.10); color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.5); }
+
+/* ── Paragraphs ── */
+.paragraph {
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  line-height: 1.65;
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.paragraph:last-child { margin-bottom: 0; }
+
+/* ── Generic section header (used by Ranks + Warband) ── */
+.sectionHeader {
+  text-align: center;
+  margin: var(--space-6) auto var(--space-4) auto;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-gray-800);
+}
+
+.sectionEyebrow {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: var(--color-gold-dark);
+  margin-bottom: var(--space-2);
+}
+
+.sectionTitle {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 1.85rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.sectionSubtitle {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: var(--space-2) auto 0 auto;
+  max-width: 560px;
+  font-style: italic;
+}
+
+/* ── Rank Structure grid ── */
+.ranks {
+  padding: var(--space-3) 0 var(--space-6) 0;
+  scroll-margin-top: calc(var(--nav-height, 70px) + var(--space-3));
+}
+
+/* ── Faction legend (above the ladder) ── */
+.ranksLegend {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-text-secondary);
+}
+
+/* Faction indicator dots (CSS, not emoji). */
+.factionDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.factionDotHorde {
+  background: var(--color-red);
+  box-shadow: 0 0 6px var(--color-red-glow);
+}
+
+.factionDotAlliance {
+  background: var(--color-alliance);
+  box-shadow: 0 0 6px var(--color-alliance-glow);
+}
+
+/* ── Dual faction pillars ── */
+/* Two parallel columns (Horde left, Alliance right) with a tier bridge
+   in the middle. Each tier is a pair of name tiles connected by a thin
+   line + tier badge, with the description spanning below. Stacks on
+   mobile (Horde tile, then Alliance tile, then description). */
+.pillars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.pillarHeader {
+  display: grid;
+  grid-template-columns: 1fr 96px 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.pillarHeaderLabel {
+  font-family: var(--font-display);
+  font-size: var(--font-size-base);
+  text-transform: uppercase;
+  letter-spacing: 4px;
+}
+
+.pillarHeaderHorde {
+  text-align: right;
+  color: var(--color-red-light);
+}
+
+.pillarHeaderAlliance {
+  text-align: left;
+  color: #6FA0E8;
+}
+
+.pillarHeaderTier {
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-text-secondary);
+}
+
+/* Each tier row: horde tile | bridge | alliance tile, with desc below */
+.pillarRow {
+  display: grid;
+  grid-template-columns: 1fr 96px 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pillarTile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--font-size-base);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.pillarTile:hover { border-color: var(--color-gold-dark); }
+
+.pillarTileHorde {
+  justify-content: flex-end;
+  border-left: 3px solid var(--color-red);
+  color: var(--color-red-light);
+  text-align: right;
+}
+
+.pillarTileAlliance {
+  justify-content: flex-start;
+  border-right: 3px solid var(--color-alliance);
+  color: #6FA0E8;
+}
+
+.pillarTileName {
+  white-space: nowrap;
+}
+
+/* Bridge: line — tier badge — line */
+.pillarBridge {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4px;
+}
+
+.pillarBridgeLine {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-gold-dark), transparent);
+}
+
+.pillarBridgeBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-gold-dark);
+  border-radius: 50%;
+  background: var(--color-black-soft);
+  color: var(--color-gold);
+  font-family: var(--font-display);
+  font-size: var(--font-size-sm);
+  text-shadow: 0 0 8px rgba(212, 175, 55, 0.4);
+}
+
+/* Description sits beneath both tiles, spanning the full row width */
+.pillarDesc {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  margin: 0;
+  padding: 0 var(--space-4);
+}
+
+/* ── Warband image grid ── */
+.warband {
+  padding: var(--space-3) 0 var(--space-8) 0;
+  scroll-margin-top: calc(var(--nav-height, 70px) + var(--space-3));
+}
+
+.warbandGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3);
+}
+
+.warbandFigure {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.warbandFigure:hover { border-color: var(--color-gold-dark); }
+.warbandFigure:hover .leaderImageZoom { opacity: 1; }
+.warbandFigure:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.warbandFigure img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  display: block;
+}
+
+.warbandCaption {
+  display: block;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-gray-800);
+  background: var(--color-black-soft);
+}
+
+/* ── Lightbox (same pattern as Story) ── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  cursor: zoom-out;
+  animation: leadershipLightboxFade 200ms ease-out;
+}
+
+@keyframes leadershipLightboxFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.lightboxImage {
+  max-width: min(96vw, 1600px);
+  max-height: 90vh;
+  object-fit: contain;
+  display: block;
+  cursor: default;
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.8), 0 0 60px rgba(212, 175, 55, 0.15);
+}
+
+.lightboxClose {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-gold);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.lightboxClose:hover {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: var(--color-gold);
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+  .sidebar { display: none; }
+  .leader {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+  .leader.leaderImageRight .leaderMedia { order: 0; }
+
+  /* Pillars collapse to a single column with the bridge becoming a tier
+     label, then horde tile, alliance tile, then description. */
+  .pillarHeader {
+    grid-template-columns: 1fr;
     text-align: center;
   }
+  .pillarHeaderHorde,
+  .pillarHeaderAlliance,
+  .pillarHeaderTier {
+    text-align: center;
+  }
+  .pillarHeaderTier { display: none; }
 
-  .leaderImage {
-    flex: none;
-    max-width: 100%;
+  .pillarRow {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-gray-800);
   }
 
-  .classLabel {
+  .pillarBridge {
+    grid-template-columns: auto;
     justify-content: center;
   }
+  .pillarBridge .pillarBridgeLine { display: none; }
 
-  .achievements {
-    align-items: center;
+  .pillarTileHorde,
+  .pillarTileAlliance {
+    justify-content: center;
+    text-align: center;
   }
+}
 
-  .name {
-    font-size: var(--font-size-3xl);
+@media (max-width: 640px) {
+  .titleBand {
+    padding: var(--space-6) var(--space-3) var(--space-4) var(--space-3);
+  }
+  .statsInline {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .statsItem {
+    flex: 1 1 40%;
+    border-right: none;
+    padding: var(--space-2);
+    border: 1px solid var(--color-gray-800);
+    border-radius: var(--border-radius-sm);
   }
 }

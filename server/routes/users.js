@@ -7,13 +7,89 @@ const { sendApprovalEmail } = require('../services/email');
 const router = express.Router();
 const RANK_ORDER = { recruit: 0, member: 1, veteran: 2, officer: 3, guildmaster: 4 };
 
-// GET /api/users
+// GET /api/users — paginated + searchable. Returns { users, total, page, page_size }.
+// Search matches username / display_name / email (case-insensitive). Filter by rank
+// via ?rank=<value>. The legacy "return everything" behavior is preserved when
+// page_size=all (used by tools like the audit script and any old client code).
 router.get('/', requireAuth, requirePermission('admin.manage_users'), async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      'SELECT id, username, email, display_name, `rank`, avatar_url, created_at FROM users ORDER BY FIELD(`rank`, "guildmaster","officer","veteran","member","recruit"), created_at ASC'
+    const search = String(req.query.search || '').trim();
+    const rank = String(req.query.rank || '').trim();
+    const wantAll = String(req.query.page_size || '') === 'all';
+    const pageSize = wantAll ? null : Math.min(200, Math.max(1, parseInt(req.query.page_size, 10) || 50));
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+
+    const where = [];
+    const params = [];
+    if (search) {
+      const like = `%${search.replace(/[%_\\]/g, '\\$&')}%`;
+      where.push('(username LIKE ? OR display_name LIKE ? OR email LIKE ?)');
+      params.push(like, like, like);
+    }
+    if (rank && RANK_ORDER.hasOwnProperty(rank)) {
+      where.push('`rank` = ?');
+      params.push(rank);
+    }
+    // ?locked_only=1 — surfaces just users with a manual rank override.
+    // Used by the Member Overrides admin page to show "currently overridden"
+    // without making the admin search for them by name.
+    if (req.query.locked_only === '1' || req.query.locked_only === 'true') {
+      where.push('rank_locked = 1');
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const [[countRow]] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM users ${whereClause}`,
+      params
     );
-    res.json({ users: rows });
+
+    const limitClause = wantAll
+      ? ''
+      : `LIMIT ${parseInt(pageSize, 10)} OFFSET ${parseInt((page - 1) * pageSize, 10)}`;
+
+    const [rows] = await pool.execute(
+      `SELECT id, username, email, display_name, \`rank\`, rank_locked, avatar_url, created_at
+       FROM users
+       ${whereClause}
+       ORDER BY FIELD(\`rank\`, "guildmaster","officer","veteran","member","recruit"), created_at ASC
+       ${limitClause}`,
+      params
+    );
+
+    // Opt-in: ?include=roles attaches each user's RBAC permission roles. Used
+    // by the Member Overrides page so admins can see + edit ranks AND roles
+    // in one place (the dual-system confusion otherwise hides Website Guru,
+    // Event Manager, etc. behind the rank dropdown's recruit/.../guildmaster
+    // ENUM).
+    const include = String(req.query.include || '').split(',').map(s => s.trim());
+    if (include.includes('roles') && rows.length > 0) {
+      const ids = rows.map(r => r.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const [roleRows] = await pool.execute(
+        `SELECT ur.user_id, r.id, r.name, r.display_name, r.color
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         WHERE ur.user_id IN (${placeholders})
+         ORDER BY r.display_name ASC`,
+        ids
+      );
+      const byUser = new Map();
+      for (const rr of roleRows) {
+        const arr = byUser.get(rr.user_id) || [];
+        arr.push({ id: rr.id, name: rr.name, display_name: rr.display_name, color: rr.color });
+        byUser.set(rr.user_id, arr);
+      }
+      for (const u of rows) {
+        u.roles = byUser.get(u.id) || [];
+      }
+    }
+
+    res.json({
+      users: rows,
+      total: countRow.total,
+      page,
+      page_size: wantAll ? rows.length : pageSize,
+    });
   } catch (err) {
     console.error('Get users error:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
@@ -62,11 +138,41 @@ router.put('/:id/rank', requireAuth, requirePermission('admin.manage_users'), as
       return res.status(403).json({ error: 'Cannot modify a user of equal or higher rank' });
     }
 
-    await pool.execute('UPDATE users SET `rank` = ? WHERE id = ?', [rank, req.params.id]);
-    res.json({ message: `User rank updated to ${rank}` });
+    // Manual rank change auto-locks the user. Otherwise the next
+    // discord-role-sync cycle (which can fire seconds later when Discord pushes
+    // a guildMemberUpdate event) recomputes rank from the user's Discord roles
+    // and silently overwrites the change. The admin can later unlock from the
+    // User Roles tab if they want auto-sync resumed.
+    await pool.execute(
+      'UPDATE users SET `rank` = ?, rank_locked = TRUE WHERE id = ?',
+      [rank, req.params.id]
+    );
+    res.json({ message: `User rank updated to ${rank} (auto-locked from Discord sync — unlock from User Roles if you want sync resumed)` });
   } catch (err) {
     console.error('Update rank error:', err);
     res.status(500).json({ error: 'Failed to update rank' });
+  }
+});
+
+// PUT /api/users/:id/rank-lock — toggle the manual-override flag.
+// Locked users are skipped by discord-role-sync (rank stays whatever it
+// was last set to manually). Ban/leave still suspends them via bot.js.
+// Gated by users.manage_overrides — granted to Guild Master by default
+// via migration 046, but any role with that permission can use it.
+router.put('/:id/rank-lock', requireAuth, requirePermission('users.manage_overrides'), async (req, res) => {
+  try {
+    const { locked } = req.body;
+    if (typeof locked !== 'boolean') {
+      return res.status(400).json({ error: '`locked` must be true or false' });
+    }
+    const [targetRows] = await pool.execute('SELECT id FROM users WHERE id = ?', [req.params.id]);
+    if (targetRows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    await pool.execute('UPDATE users SET rank_locked = ? WHERE id = ?', [locked ? 1 : 0, req.params.id]);
+    res.json({ message: locked ? 'Rank locked — Discord sync will skip this user.' : 'Rank unlocked — Discord sync will resume.' });
+  } catch (err) {
+    console.error('Update rank lock error:', err);
+    res.status(500).json({ error: 'Failed to update rank lock' });
   }
 });
 

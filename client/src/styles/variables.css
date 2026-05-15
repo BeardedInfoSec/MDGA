@@ -13,9 +13,13 @@
   --color-gray-400: #9CA3AF;
   --color-gray-300: #D1D5DB;
 
-  --color-gold-dark: #F5C518;
-  --color-gold: #FFE033;
-  --color-gold-light: #FFED4A;
+  /* Antique Gold palette — replaces the old retina-burning #FFE033 with a
+     classic heraldic gold (D4AF37). Lower luminance + saturation, much
+     easier on the eyes during long admin sessions while still reading
+     clearly as "gold" on the dark backgrounds. */
+  --color-gold-dark: #B8941F;
+  --color-gold: #D4AF37;
+  --color-gold-light: #E5C865;
 
   --color-parchment: #D4C5A9;
   --color-parchment-light: #E8DECA;
@@ -34,7 +38,7 @@
   --color-text-primary: #E5E5E5;
   --color-text-secondary: #9CA3AF;
   --color-text-muted: #9CA3AF;
-  --color-text-heading: #FFE033;
+  --color-text-heading: #D4AF37;
   --color-text-on-red: #FFFFFF;
 
   /* === TYPOGRAPHY === */

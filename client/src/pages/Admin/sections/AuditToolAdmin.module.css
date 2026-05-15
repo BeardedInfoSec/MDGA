@@ -1,0 +1,122 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.helper {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.6;
+  max-width: 70ch;
+}
+
+.helper code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--color-gold);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.actions :global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(185, 28, 28, 0.12);
+  border: 1px solid var(--color-red);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-red-light);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.tokenCard {
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02));
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tokenHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.tokenLabel {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-gold);
+}
+
+.tokenMeta {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.tokenTextarea {
+  width: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  padding: var(--space-3);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  resize: none;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.tokenTextarea:focus {
+  outline: none;
+  border-color: var(--color-gold-dark);
+}
+
+.tokenActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.tokenActions :global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tokenWarning {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}

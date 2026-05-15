@@ -1,21 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { BRACKET_LABELS, FORMAT_NUMBER, SECTIONS } from '../../data/leaderboardData';
 import { armoryUrl } from '../../utils/helpers';
-import PageHero from '../../components/common/PageHero';
-import { Table, TableWrap } from '../../components/ui';
 import styles from './Leaderboards.module.css';
 
 const PAGE_SIZES = [20, 50, 100];
 
+// Flatten all brackets in a stable order so the title band can show the
+// total count and the sidebar can render section dividers in order.
+const ALL_BRACKETS = Object.entries(SECTIONS).flatMap(([sectionKey, sec]) =>
+  sec.brackets.map((b) => ({ ...b, sectionKey, sectionLabel: sec.label }))
+);
+
+function findSectionByBracket(bracketKey) {
+  for (const [key, sec] of Object.entries(SECTIONS)) {
+    if (sec.brackets.some((b) => b.key === bracketKey)) return key;
+  }
+  return 'pvp';
+}
+
 export default function Leaderboards() {
   useDocumentTitle('Leaderboards | MDGA');
+  const { user, isLoggedIn, apiFetch, hasPermission } = useAuth();
 
-  const { user, apiFetch, hasPermission } = useAuth();
-
-  const [section, setSection] = useState('pvp');
   const [bracket, setBracket] = useState('solo_shuffle');
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,13 +33,43 @@ export default function Leaderboards() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Search state — debounced to avoid hammering the API on every keystroke
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimer = useRef(null);
+
+  // Client-side column sort. null = use server order (which is bracket DESC).
+  // Each column has a natural default direction picked when first selected.
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const activeSection = findSectionByBracket(bracket);
 
-  const fetchLeaderboard = useCallback(async (bracketKey, pg, ps) => {
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(searchTimer.current);
+  }, [searchInput]);
+
+  const fetchLeaderboard = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/leaderboard?bracket=${bracketKey}&page=${pg}&page_size=${ps}`);
+      const params = new URLSearchParams();
+      params.set('bracket', bracket);
+      params.set('page', String(page));
+      params.set('page_size', String(pageSize));
+      if (debouncedSearch) params.set('q', debouncedSearch);
+      if (sortKey) {
+        params.set('sort_by', sortKey);
+        params.set('sort_dir', sortDir);
+      }
+      const res = await apiFetch(`/leaderboard?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries || []);
@@ -44,56 +84,92 @@ export default function Leaderboards() {
     } finally {
       setLoading(false);
     }
-  }, [apiFetch]);
+  }, [apiFetch, bracket, page, pageSize, debouncedSearch, sortKey, sortDir]);
 
-  useEffect(() => {
-    fetchLeaderboard(bracket, page, pageSize);
-  }, [bracket, page, pageSize, fetchLeaderboard]);
+  useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
 
-  const handleSectionClick = (sectionKey) => {
-    setSection(sectionKey);
-    const firstBracket = SECTIONS[sectionKey].brackets[0].key;
-    setBracket(firstBracket);
-    setPage(1);
-  };
-
-  const handleBracketClick = (bracketKey) => {
+  function handleBracketClick(bracketKey) {
     setBracket(bracketKey);
     setPage(1);
+    // Different bracket → "value" / "winRate" mean different things; reset.
+    setSortKey(null);
+  }
+
+  const SORT_DEFAULTS = {
+    rank: 'asc',
+    character: 'asc',
+    player: 'asc',
+    class: 'asc',
+    value: 'desc',
+    winRate: 'desc',
   };
 
-  const handlePageSizeChange = (newSize) => {
+  function handleSort(key) {
+    setPage(1);
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(SORT_DEFAULTS[key] || 'asc');
+    }
+  }
+
+  function SortHeader({ sortKey: key, label, align }) {
+    const active = sortKey === key;
+    const Icon = active ? (sortDir === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        className={`${styles.sortableHeader} ${active ? styles.sortableHeaderActive : ''} ${align === 'right' ? styles.sortableHeaderRight : ''}`}
+        onClick={() => handleSort(key)}
+        aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span className={styles.sortHeaderInner}>
+          <span>{label}</span>
+          <Icon size={12} aria-hidden="true" className={styles.sortIcon} />
+        </span>
+      </th>
+    );
+  }
+
+  function handlePageSizeChange(newSize) {
     setPageSize(newSize);
     setPage(1);
-  };
+  }
 
-  const handleRefreshGuild = async () => {
+  async function handleRefreshGuild() {
+    setRefreshing(true);
     try {
       const res = await apiFetch('/leaderboard/refresh-guild', { method: 'POST' });
-      if (res.ok) {
-        fetchLeaderboard(bracket, page, pageSize);
-      }
-    } catch {
-      // silent
+      if (res.ok) fetchLeaderboard();
+    } finally {
+      setTimeout(() => setRefreshing(false), 1500);
     }
-  };
+  }
+
+  function clearSearch() {
+    setSearchInput('');
+    setDebouncedSearch('');
+    setPage(1);
+  }
 
   const formatValue = (entry) => {
     const raw = entry[bracket] || entry.ps_item_level || 0;
-    if (FORMAT_NUMBER.has(bracket)) {
-      return (raw || 0).toLocaleString();
-    }
+    if (FORMAT_NUMBER.has(bracket)) return (raw || 0).toLocaleString();
     return raw;
   };
 
   const isWinRateBracket = bracket === 'arenas_won' || bracket === 'bgs_won';
 
-  const getRowClasses = (entry, index) => {
+  // Server stamps `leaderboard_rank` on every row (ROW_NUMBER over the
+  // bracket metric DESC), so the Rank column stays meaningful regardless
+  // of how the user re-sorts.
+  const getRowClasses = (entry) => {
     const classes = [styles.row];
-    const globalRank = (page - 1) * pageSize + index;
-    if (globalRank === 0) classes.push(styles.rowTop1);
-    if (globalRank === 1) classes.push(styles.rowTop2);
-    if (globalRank === 2) classes.push(styles.rowTop3);
+    if (!debouncedSearch) {
+      if (entry.leaderboard_rank === 1) classes.push(styles.rowTop1);
+      if (entry.leaderboard_rank === 2) classes.push(styles.rowTop2);
+      if (entry.leaderboard_rank === 3) classes.push(styles.rowTop3);
+    }
     if (user && entry.user_id === user.id) classes.push(styles.rowOwn);
     return classes.join(' ');
   };
@@ -114,20 +190,30 @@ export default function Leaderboards() {
     return '-';
   };
 
-  const toggleExpand = (id) => {
-    setExpandedId(prev => prev === id ? null : id);
-  };
+  const toggleExpand = (id) => setExpandedId((prev) => prev === id ? null : id);
 
   const fmt = (v) => (v || 0).toLocaleString();
 
+  // Title band stats — derived from the current view + bracket totals
+  const stats = useMemo(() => {
+    const topEntry = entries[0];
+    const topRaw = topEntry ? (topEntry[bracket] || 0) : 0;
+    const topDisplay = topRaw
+      ? (FORMAT_NUMBER.has(bracket) ? topRaw.toLocaleString() : String(topRaw))
+      : '—';
+    return [
+      { value: total ? total.toLocaleString() : '—', label: 'Ranked here' },
+      { value: topDisplay, label: `Top ${BRACKET_LABELS[bracket] || ''}`.trim() },
+      { value: String(ALL_BRACKETS.length), label: 'Brackets' },
+      { value: refreshing ? 'Refreshing…' : 'Live', label: 'Status' },
+    ];
+  }, [entries, bracket, total, refreshing]);
+
   const renderExpandedRow = (entry, colSpan) => {
     const arenaWinRate = entry.arenas_played > 0
-      ? `${((entry.arenas_won / entry.arenas_played) * 100).toFixed(1)}%`
-      : '-';
+      ? `${((entry.arenas_won / entry.arenas_played) * 100).toFixed(1)}%` : '-';
     const bgWinRate = entry.bgs_played > 0
-      ? `${((entry.bgs_won / entry.bgs_played) * 100).toFixed(1)}%`
-      : '-';
-
+      ? `${((entry.bgs_won / entry.bgs_played) * 100).toFixed(1)}%` : '-';
     return (
       <tr className={styles.expandedRow}>
         <td colSpan={colSpan}>
@@ -171,164 +257,237 @@ export default function Leaderboards() {
     );
   };
 
+  const colSpan = isWinRateBracket ? 7 : 6;
+
   return (
-    <>
-      <PageHero title="Leaderboards" subtitle="Guild rankings across PvP, PvE, and more" />
-
-      <div className="container section">
-        {/* Section Tabs */}
-        <div className={styles.sections}>
-          {Object.entries(SECTIONS).map(([key, sec]) => (
-            <button
-              key={key}
-              className={section === key ? styles.sectionTabActive : styles.sectionTab}
-              onClick={() => handleSectionClick(key)}
-            >
-              {sec.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Bracket Tabs */}
-        <div className={styles.brackets}>
-          {SECTIONS[section].brackets.map((b) => (
-            <button
-              key={b.key}
-              className={bracket === b.key ? styles.bracketTabActive : styles.bracketTab}
-              onClick={() => handleBracketClick(b.key)}
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Officer Controls */}
-        {hasPermission('leaderboard.bulk_refresh') && (
-          <div className={styles.officerControls}>
-            <button className="btn btn--primary" onClick={handleRefreshGuild}>
-              Refresh Guild Stats
-            </button>
+    <div className={styles.page}>
+      <header className={styles.titleBand}>
+        <div className={styles.titleBandInner}>
+          <span className={styles.eyebrow}>Guild Rankings</span>
+          <h1 className={styles.pageTitle}>Leaderboards</h1>
+          <p className={styles.pageSubtitle}>
+            PvP, PvE, and achievement standings across the warband. Click any row to
+            expand a member&apos;s full stat sheet.
+            {!isLoggedIn && (
+              <>
+                {' '}<Link to="/login" className={styles.signInNudge}>Sign in</Link> to see
+                the player behind each character.
+              </>
+            )}
+          </p>
+          <div className={styles.statsInline}>
+            {stats.map((s) => (
+              <div key={s.label} className={styles.statsItem}>
+                <span className={styles.statsValue}>{s.value}</span>
+                <span className={styles.statsLabel}>{s.label}</span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      </header>
 
-        {/* Table */}
-        {loading ? (
-          <p className={styles.empty}>Loading leaderboard...</p>
-        ) : entries.length === 0 ? (
-          <p className={styles.empty}>No entries found for this bracket.</p>
-        ) : (
-          <>
-            <TableWrap className={styles.tableWrap}>
-              <Table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Character</th>
-                    <th>Player</th>
-                    <th>Class / Spec</th>
-                    <th>{BRACKET_LABELS[bracket] || 'Value'}</th>
-                    {isWinRateBracket && <th>Win Rate</th>}
-                    <th>Armory</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry, index) => {
-                    const isExpanded = expandedId === (entry.id || index);
-                    const colSpan = isWinRateBracket ? 7 : 6;
+      <div className={styles.layout}>
+        {/* Sticky bracket sidebar */}
+        <aside className={styles.sidebar} aria-label="Bracket categories">
+          <div className={styles.sidebarSticky}>
+            <span className={styles.sidebarLabel}>Brackets</span>
+            <nav className={styles.sidebarNav}>
+              {Object.entries(SECTIONS).map(([sectionKey, sec]) => (
+                <div key={sectionKey} className={styles.sidebarGroup}>
+                  <span className={`${styles.sidebarGroupLabel} ${activeSection === sectionKey ? styles.sidebarGroupLabelActive : ''}`}>
+                    {sec.label}
+                  </span>
+                  {sec.brackets.map((b) => {
+                    const isActive = bracket === b.key;
                     return (
-                      <React.Fragment key={entry.id || index}>
-                        <tr
-                          className={`${getRowClasses(entry, index)} ${styles.clickableRow} ${isExpanded ? styles.rowExpanded : ''}`}
-                          onClick={() => toggleExpand(entry.id || index)}
-                        >
-                          <td className={styles.rank}>{(page - 1) * pageSize + index + 1}</td>
-                          <td>
-                            <span className={styles.charLink}>{entry.character_name}</span>
-                            {entry.realm_slug && (
-                              <span className={styles.realmMeta}>
-                                {' '}- {entry.realm || entry.realm_slug}
-                              </span>
-                            )}
-                            {entry.user_id && entry.is_main && <span className={styles.mainTag}>Main</span>}
-                          </td>
-                          <td>
-                            {entry.user_id ? (
-                              <Link
-                                to={`/profile?id=${entry.user_id}`}
-                                className={styles.playerLink}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <span className={`rank-badge rank-badge--${entry.user_rank}`}>
-                                  {entry.display_name}
-                                </span>
-                              </Link>
-                            ) : (
-                              <span className={styles.emptyCell}>-</span>
-                            )}
-                          </td>
-                          <td>{`${entry.class || ''}${getSpec(entry) ? ` - ${getSpec(entry)}` : ''}`}</td>
-                          <td className={styles.rating}>{formatValue(entry)}</td>
-                          {isWinRateBracket && <td>{getWinRate(entry)}</td>}
-                          <td>
-                            {entry.realm_slug && entry.character_name && (
-                              <a
-                                href={armoryUrl(entry.realm_slug, entry.character_name)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={styles.armoryLink}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                Armory
-                              </a>
-                            )}
-                          </td>
-                        </tr>
-                        {isExpanded && renderExpandedRow(entry, colSpan)}
-                      </React.Fragment>
+                      <button
+                        key={b.key}
+                        type="button"
+                        className={`${styles.sidebarItem} ${isActive ? styles.sidebarItemActive : ''}`}
+                        onClick={() => handleBracketClick(b.key)}
+                      >
+                        <span className={styles.sidebarItemTitle}>{b.label}</span>
+                      </button>
                     );
                   })}
-                </tbody>
-              </Table>
-            </TableWrap>
+                </div>
+              ))}
+            </nav>
+          </div>
+        </aside>
 
-            {/* Pagination */}
-            <div className={styles.pagination}>
-              <div className={styles.pageSizeWrap}>
-                <span className={styles.pageSizeLabel}>Show:</span>
-                {PAGE_SIZES.map((size) => (
-                  <button
-                    key={size}
-                    className={pageSize === size ? styles.pageSizeBtnActive : styles.pageSizeBtn}
-                    onClick={() => handlePageSizeChange(size)}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-
-              <div className={styles.pageControls}>
+        <main className={styles.content}>
+          {/* Search + officer controls */}
+          <div className={styles.toolbar}>
+            <div className={styles.searchWrap}>
+              <input
+                type="text"
+                className={styles.searchInput}
+                placeholder={isLoggedIn ? 'Search by character or Discord name…' : 'Search by character name…'}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+              {searchInput && (
                 <button
-                  className={styles.pageBtn}
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page <= 1}
+                  type="button"
+                  className={styles.searchClear}
+                  onClick={clearSearch}
+                  aria-label="Clear search"
+                  title="Clear search"
                 >
-                  Prev
+                  ×
                 </button>
-                <span className={styles.pageInfo}>
-                  Page {page} of {totalPages} ({total} total)
-                </span>
-                <button
-                  className={styles.pageBtn}
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                >
-                  Next
-                </button>
-              </div>
+              )}
             </div>
-          </>
-        )}
+            {hasPermission('leaderboard.bulk_refresh') ? (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={handleRefreshGuild}
+                disabled={refreshing}
+              >
+                {refreshing ? 'Refreshing…' : 'Refresh Guild Stats'}
+              </button>
+            ) : null}
+          </div>
+
+          {debouncedSearch ? (
+            <div className={styles.searchSummary}>
+              <span>
+                {total.toLocaleString()} match{total === 1 ? '' : 'es'} for{' '}
+                <strong>&ldquo;{debouncedSearch}&rdquo;</strong> in {BRACKET_LABELS[bracket] || bracket}
+              </span>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={clearSearch}>
+                Clear search
+              </button>
+            </div>
+          ) : null}
+
+          {/* Table */}
+          {loading ? (
+            <p className={styles.empty}>Loading leaderboard…</p>
+          ) : entries.length === 0 ? (
+            <p className={styles.empty}>
+              {debouncedSearch
+                ? `No matches for "${debouncedSearch}" in this bracket.`
+                : 'No entries yet for this bracket.'}
+            </p>
+          ) : (
+            <>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <SortHeader sortKey="rank" label="Rank" />
+                      <SortHeader sortKey="character" label="Character" />
+                      <SortHeader sortKey="player" label="Player" />
+                      <SortHeader sortKey="class" label="Class / Spec" />
+                      <SortHeader sortKey="value" label={BRACKET_LABELS[bracket] || 'Value'} />
+                      {isWinRateBracket ? <SortHeader sortKey="winRate" label="Win Rate" /> : null}
+                      <th>Armory</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry, index) => {
+                      const id = entry.id || index;
+                      const isExpanded = expandedId === id;
+                      return (
+                        <React.Fragment key={id}>
+                          <tr
+                            className={`${getRowClasses(entry)} ${styles.clickableRow} ${isExpanded ? styles.rowExpanded : ''}`}
+                            onClick={() => toggleExpand(id)}
+                          >
+                            <td className={styles.rank}>{entry.leaderboard_rank}</td>
+                            <td>
+                              <span className={styles.charLink}>{entry.character_name}</span>
+                              {entry.realm_slug ? (
+                                <span className={styles.realmMeta}>
+                                  {' '}— {entry.realm || entry.realm_slug}
+                                </span>
+                              ) : null}
+                              {entry.user_id && entry.is_main ? <span className={styles.mainTag}>Main</span> : null}
+                            </td>
+                            <td>
+                              {entry.user_id ? (
+                                <Link
+                                  to={`/profile?id=${entry.user_id}`}
+                                  className={styles.playerLink}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <span className={`rank-badge rank-badge--${entry.user_rank}`}>
+                                    {entry.display_name}
+                                  </span>
+                                </Link>
+                              ) : (
+                                <span className={styles.emptyCell}>—</span>
+                              )}
+                            </td>
+                            <td>{`${entry.class || ''}${getSpec(entry) ? ` — ${getSpec(entry)}` : ''}`}</td>
+                            <td className={styles.rating}>{formatValue(entry)}</td>
+                            {isWinRateBracket ? <td>{getWinRate(entry)}</td> : null}
+                            <td>
+                              {entry.realm_slug && entry.character_name ? (
+                                <a
+                                  href={armoryUrl(entry.realm_slug, entry.character_name)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={styles.armoryLink}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  Armory
+                                </a>
+                              ) : null}
+                            </td>
+                          </tr>
+                          {isExpanded ? renderExpandedRow(entry, colSpan) : null}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className={styles.pagination}>
+                <div className={styles.pageSizeWrap}>
+                  <span className={styles.pageSizeLabel}>Show:</span>
+                  {PAGE_SIZES.map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={pageSize === size ? styles.pageSizeBtnActive : styles.pageSizeBtn}
+                      onClick={() => handlePageSizeChange(size)}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.pageControls}>
+                  <button
+                    type="button"
+                    className={styles.pageBtn}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                  >
+                    Prev
+                  </button>
+                  <span className={styles.pageInfo}>
+                    Page {page} of {totalPages} ({total.toLocaleString()} total)
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.pageBtn}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </main>
       </div>
-    </>
+    </div>
   );
 }

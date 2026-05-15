@@ -402,8 +402,13 @@
 }
 
 /* Dashboard */
+/* The image layer comes from --home-bg-image, set by Home.jsx after the
+   /api/carousel response. Fallback is just the dark gradient — no
+   hardcoded image URL, so we don't flash an old background while the
+   API response is in flight. */
 .authBackdrop {
   padding-top: var(--nav-height);
+  background-color: var(--color-black);
   background-image:
     linear-gradient(
       to bottom,
@@ -411,7 +416,7 @@
       rgba(10, 10, 10, 0.75) 50%,
       rgba(10, 10, 10, 0.95) 100%
     ),
-    var(--home-bg-image, url('/images/Screenshot_2026-02-06_18-21-39.png'));
+    var(--home-bg-image, none);
   background-size: cover, contain;
   background-position: center top, center top;
   background-repeat: no-repeat, no-repeat;
@@ -509,8 +514,12 @@
 .dashStat {
   text-align: center;
   padding: var(--space-4) var(--space-3);
-  background: var(--color-gray-900);
-  border: 1px solid var(--color-gray-700);
+  /* Translucent over the hero banner — backdrop-blur keeps the numbers
+     legible while letting the MAKE DUROTAR GREAT AGAIN art bleed through. */
+  background: rgba(17, 17, 17, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--border-radius-md);
 }
 
@@ -536,8 +545,10 @@
 }
 
 .dashPanel {
-  background: var(--color-gray-900);
-  border: 1px solid var(--color-gray-700);
+  background: rgba(17, 17, 17, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--border-radius-md);
   padding: var(--space-6);
 }

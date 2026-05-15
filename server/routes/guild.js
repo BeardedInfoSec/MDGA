@@ -10,11 +10,46 @@ const router = express.Router();
 // ─── MEMBER ENDPOINTS ───
 
 // GET /api/guild/summary — guild profile + recent activity + achievements.
-// Defaults to the primary guild for the home page; admin Guild tab passes
-// ?guild_id=N to switch to any tracked federation guild.
+// Defaults to the primary guild for the home page. Admin Guild tab passes
+// `?guild_id=N` for a single federation guild, or `?guild_id=all` to get a
+// synthetic "Federation total" card aggregating every tracked guild.
 router.get('/summary', requireAuth, async (req, res) => {
   try {
-    const guildIdRaw = parseInt(req.query.guild_id, 10);
+    const guildIdParam = req.query.guild_id;
+    if (guildIdParam === 'all') {
+      // Aggregate across the entire federation.
+      const [agg] = await pool.execute(
+        `SELECT COALESCE(SUM(member_count), 0) AS member_count,
+                COALESCE(SUM(achievement_points), 0) AS achievement_points,
+                MAX(last_synced_at) AS last_synced_at,
+                COUNT(*) AS guild_count
+         FROM guilds`
+      );
+      const [recentActivity] = await pool.execute(
+        `SELECT activity_type, character_name, description, occurred_at
+         FROM guild_activity ORDER BY occurred_at DESC LIMIT 10`
+      );
+      const [recentAchievements] = await pool.execute(
+        `SELECT achievement_name, description, completed_at
+         FROM guild_achievements ORDER BY completed_at DESC LIMIT 5`
+      );
+      return res.json({
+        guild: {
+          id: 'all',
+          name: `Federation total (${agg[0].guild_count} guilds)`,
+          realm_slug: 'federation',
+          faction: 'BOTH',
+          member_count: agg[0].member_count,
+          achievement_points: agg[0].achievement_points,
+          last_synced_at: agg[0].last_synced_at,
+          is_primary: false,
+        },
+        recentActivity,
+        recentAchievements,
+      });
+    }
+
+    const guildIdRaw = parseInt(guildIdParam, 10);
     let guilds;
     if (Number.isFinite(guildIdRaw) && guildIdRaw > 0) {
       [guilds] = await pool.execute('SELECT * FROM guilds WHERE id = ? LIMIT 1', [guildIdRaw]);
@@ -66,13 +101,22 @@ router.get('/roster', requireAuth, requirePermission('guild.view_roster'), async
     const bannedOnly = req.query.banned === '1';
     const sort = req.query.sort || 'guild_rank';
     const order = (req.query.order || '').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
-    const guildId = req.query.guild_id || null;
+    const guildIdRaw = req.query.guild_id || null;
+    // `guild_id=all` returns members across the entire federation (every
+    // tracked guild). Otherwise a numeric value filters to that guild, or
+    // missing falls back to the primary guild for backwards compat with
+    // older client builds and external scripts.
+    const guildIsAll = guildIdRaw === 'all';
+    const guildId = guildIsAll ? null : guildIdRaw;
     const pageSize = req.query.page_size === 'all' ? null : Math.min(200, parseInt(req.query.page_size, 10) || 20);
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
 
     const params = [];
     let guildClause = '';
-    if (guildId) {
+    if (guildIsAll) {
+      // No guild filter — full federation roster.
+      guildClause = '';
+    } else if (guildId) {
       guildClause = 'AND gm.guild_id = ?';
       params.push(parseInt(guildId, 10));
     } else {
@@ -326,7 +370,17 @@ router.get('/game-rank-mappings/:guildId', requireAuth, requireOfficer, async (r
       [guildId]
     );
 
-    res.json({ mappings, rosterRanks });
+    // Federation-wide counts so admins can see the impact of a mapping
+    // across every guild in the federation, not just the one they're
+    // editing. Indexed by rank number (which is standardized across the
+    // MDGA federation per the user's setup).
+    const [federationRanks] = await pool.execute(
+      `SELECT guild_rank AS \`rank\`, COUNT(*) AS count
+       FROM guild_members
+       GROUP BY guild_rank ORDER BY guild_rank ASC`
+    );
+
+    res.json({ mappings, rosterRanks, federationRanks });
   } catch (err) {
     console.error('Get game rank mappings error:', err);
     res.status(500).json({ error: 'Failed to fetch game rank mappings' });

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
-import PageHero from '../../components/common/PageHero';
 import styles from './Join.module.css';
 
 const DISCORD_SVG = (
@@ -170,54 +169,88 @@ export default function Join() {
   ];
 
   return (
-    <>
-      <PageHero title="Join the Warband" subtitle="Think you have what it takes to fight for Durotar?" />
+    <div className={styles.page}>
+      <header className={styles.titleBand}>
+        <div className={styles.titleBandInner}>
+          <span className={styles.eyebrow}>Recruitment</span>
+          <h1 className={styles.pageTitle}>Join the Warband</h1>
+          <p className={styles.pageSubtitle}>
+            Three steps to get into MDGA — Discord, in-game, then verify. Apply
+            below or roll directly into the guild finder.
+          </p>
+        </div>
+      </header>
 
-      <section className="section section--darker">
-        <div className="container">
-          <h2 className="section-title">How to Join</h2>
-          <div className="grid grid--3">
+      <div className={styles.body}>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionEyebrow}>Step by step</span>
+            <h2 className={styles.sectionTitle}>How to join</h2>
+          </div>
+          <div className={styles.stepsGrid}>
             {[
-              { icon: '1', title: 'Join Discord', desc: 'Discord is required. Join our server to get started:', link: true },
-              { icon: '2', title: 'Find Us In-Game', desc: 'Use Guild Finder and type MDGA to pull up all our guilds, or post in guild-invite-request on our Discord.' },
-              { icon: '3', title: 'Verify Yourself', desc: "Type your Main's name and Server in the Verification Channel on Discord." },
+              { num: 1, title: 'Join Discord', desc: 'Discord is required — coordination and community happen there.', link: true },
+              { num: 2, title: 'Find us in-game', desc: 'Open the in-game Guild Finder (default: J) and search "MDGA" — all our divisions appear. You can also post in guild-invite-request on Discord.', screenshot: '/images/guild-finder.png' },
+              { num: 3, title: 'Verify yourself', desc: "Type your Main's name and server in the Verification channel on Discord." },
             ].map((step) => (
-              <div key={step.icon} className={`card ${styles.requirementCard}`}>
-                <span className={styles.requirementCardIcon} aria-hidden="true">{step.icon}</span>
-                <h3>{step.title}</h3>
-                <p>{step.desc}</p>
+              <div key={step.num} className={styles.stepCard}>
+                <span className={styles.stepNumber}>{step.num}</span>
+                <h3 className={styles.stepTitle}>{step.title}</h3>
+                <p className={styles.stepDesc}>{step.desc}</p>
                 {step.link && (
-                  <a href="https://discord.gg/wowmdga" target="_blank" rel="noopener noreferrer" className={`btn btn--gold ${styles.stepLinkBtn}`}>
+                  <a href="https://discord.gg/wowmdga" target="_blank" rel="noopener noreferrer" className={`btn btn--gold btn--sm ${styles.stepLinkBtn}`}>
                     discord.gg/wowmdga
                   </a>
+                )}
+                {step.screenshot && (
+                  <img
+                    src={step.screenshot}
+                    alt="In-game guild finder showing MDGA search"
+                    className={styles.stepScreenshot}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    loading="lazy"
+                  />
                 )}
               </div>
             ))}
           </div>
-        </div>
-      </section>
+          <p className={styles.altPathNote}>
+            Prefer the formal route?{' '}
+            <a
+              href="https://guildsofwow.com/make-durotar-great-again"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.altPathLink}
+            >
+              Apply on guildsofwow.com
+            </a>
+            {' '}— optional, requires a GoW account linked to Battle.net.
+          </p>
+        </section>
 
-      <section className="section section--dark">
-        <div className="container">
-          <h2 className="section-title">Requirements</h2>
-          <div className="grid grid--2">
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionEyebrow}>Expectations</span>
+            <h2 className={styles.sectionTitle}>Requirements</h2>
+          </div>
+          <div className={styles.reqGrid}>
             {[
-              { icon: '\u{1F4AC}', title: 'Discord Required', desc: 'All members must be active in our Discord server. This is how we coordinate, communicate, and build community.' },
-              { icon: '\u2694', title: 'Stay Active', desc: 'Minimum activity requirements apply. Log in regularly, attend events, and participate. Inactives will be removed.' },
+              { title: 'Discord required', desc: 'All members must be active in our Discord server. It\u2019s how we coordinate, communicate, and build community.' },
+              { title: 'Stay active', desc: 'Log in regularly, show up to events, participate. Long-term inactives get rotated out of MDGA 1 to keep the core sharp.' },
             ].map((req) => (
-              <div key={req.title} className={`card ${styles.requirementCard}`}>
-                <span className={styles.requirementCardIcon} aria-hidden="true">{req.icon}</span>
-                <h3>{req.title}</h3>
-                <p>{req.desc}</p>
+              <div key={req.title} className={styles.reqCard}>
+                <h3 className={styles.reqTitle}>{req.title}</h3>
+                <p className={styles.reqDesc}>{req.desc}</p>
               </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="section section--dark">
-        <div className="container container--narrow">
-          <h2 className="section-title">Guild Rules</h2>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionEyebrow}>Code of conduct</span>
+            <h2 className={styles.sectionTitle}>Guild rules</h2>
+          </div>
           <div className={styles.faq}>
             {rules.map((rule, i) => (
               <FaqItem
@@ -229,24 +262,28 @@ export default function Join() {
               />
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="section section--dark">
-        <div className="container container--narrow">
-          <h2 className="section-title">Apply to Join</h2>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionEyebrow}>Application</span>
+            <h2 className={styles.sectionTitle}>Apply to join</h2>
+            <p className={styles.sectionLede}>
+              Submitting authenticates you with Discord and creates a pending application
+              that an officer will review.
+            </p>
+          </div>
 
+          <div className={styles.applicationCard}>
           {pending ? (
             <div className={styles.pendingBox}>
               <div className={styles.pendingInfo}>
-                Whoops! Looks like you are not a member of our Discord just yet.
-                Don't worry, we have let our officers know and they will review your
-                request shortly! Keep an eye on your email
-                {pendingEmail ? <> at <strong>{pendingEmail}</strong></> : ''} for
-                an invitation code!
+                Whoops — looks like you&apos;re not in our Discord yet. Officers have
+                been notified and will review your request shortly. Watch your email
+                {pendingEmail ? <> at <strong>{pendingEmail}</strong></> : ''} for an invite.
               </div>
               <p className={styles.pendingText}>
-                In the meantime, you can join our Discord server directly:
+                Want to jump straight into the server?
               </p>
               <a href="https://discord.gg/wowmdga" target="_blank" rel="noopener noreferrer" className="btn btn--discord btn--lg btn--full">
                 {DISCORD_SVG}
@@ -255,7 +292,7 @@ export default function Join() {
             </div>
           ) : (
             <form className={styles.applicationForm} onSubmit={handleSubmit} noValidate>
-              <h3 className={styles.sectionLabel}>Character Info</h3>
+              <h3 className={styles.formSectionLabel}>Character info</h3>
 
               <div className={`${styles.formGroup} ${fieldErrors.characterName ? styles.formGroupError : ''}`}>
                 <label className={styles.formLabel} htmlFor="character-name">Character Name</label>
@@ -369,7 +406,7 @@ export default function Join() {
               </div>
 
               <hr className={styles.sectionDivider} />
-              <h3 className={styles.sectionLabel}>About You</h3>
+              <h3 className={styles.formSectionLabel}>About you</h3>
 
               <div className={styles.formGroup}>
                 <label className={styles.formLabel} htmlFor="experience">PvP Experience</label>
@@ -399,16 +436,18 @@ export default function Join() {
 
               <button type="submit" className="btn btn--discord btn--lg btn--full" disabled={submitting}>
                 {DISCORD_SVG}
-                {submitting ? 'Submitting...' : 'Join with Discord'}
+                {submitting ? 'Submitting…' : 'Join with Discord'}
               </button>
             </form>
           )}
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <section className="section section--darker">
-        <div className="container container--narrow">
-          <h2 className="section-title">Frequently Asked Questions</h2>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionEyebrow}>Common questions</span>
+            <h2 className={styles.sectionTitle}>FAQ</h2>
+          </div>
           <div className={styles.faq}>
             {faqs.map((faq, i) => (
               <FaqItem
@@ -420,8 +459,8 @@ export default function Join() {
               />
             ))}
           </div>
-        </div>
-      </section>
-    </>
+        </section>
+      </div>
+    </div>
   );
 }

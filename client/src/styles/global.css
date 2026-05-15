@@ -83,6 +83,27 @@ body {
   color: var(--color-text-primary);
   background-color: var(--color-black);
   overflow-x: hidden;
+  position: relative;
+}
+
+/* Site-wide background image (set by Layout via useSiteBackground hook).
+   Renders as a fixed layer behind everything at low opacity so it ties the
+   pages together without competing with content. Page-specific backdrops
+   (e.g. Home's authBackdrop, Login's hero) sit above and visually dominate
+   when present — this is a quiet base, not the headline. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--color-black);
+  background-image: var(--site-bg-image, none);
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  opacity: 0.22;
 }
 
 h1, h2, h3, h4, h5 {

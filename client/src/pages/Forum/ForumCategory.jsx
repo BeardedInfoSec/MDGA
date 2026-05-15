@@ -3,8 +3,23 @@ import { Link, useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
-import PageHero from '../../components/common/PageHero';
+import { authorDisplayName, authorProfileLink, isFormerMember } from '../../utils/forumAuthor';
+import AgeGate from '../../components/common/AgeGate';
+import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
+
+const FALLBACK_ICONS = {
+  'General Discussion': '\u{1F4AC}',
+  'PvP Strategy': '⚔️',
+  'Recruitment': '\u{1F4CB}',
+  'Off-Topic': '\u{1F3AE}',
+  'Guild Announcements': '\u{1F4E2}',
+};
+
+const CTRL_RE = new RegExp('[\\u0000-\\u001F\\u007F]', 'g');
+function cleanForumTitle(value) {
+  return String(value || '').replace(CTRL_RE, '').trim();
+}
 
 function getPerPage() {
   const stored = localStorage.getItem('forum_per_page');
@@ -18,6 +33,7 @@ export default function ForumCategory() {
   const navigate = useNavigate();
   const { isLoggedIn, isOfficer, apiFetch } = useAuth();
 
+  const [allCategories, setAllCategories] = useState([]);
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -28,14 +44,27 @@ export default function ForumCategory() {
 
   useDocumentTitle(category ? `${category.name} | MDGA Forum` : 'Forum | MDGA');
 
+  // Load all categories for the sidebar (separate from the category-specific load)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = isLoggedIn
+          ? await apiFetch('/forum/categories')
+          : await fetch('/api/forum/categories');
+        const data = await res.json();
+        setAllCategories(data.categories || []);
+      } catch {
+        setAllCategories([]);
+      }
+    })();
+  }, [isLoggedIn, apiFetch]);
+
   const loadPosts = useCallback(async () => {
     if (!slug) return;
     setLoading(true);
     try {
       const path = `/forum/categories/${slug}/posts?page=${page}&sort=${sort}&limit=${perPage}`;
-      const res = isLoggedIn
-        ? await apiFetch(path)
-        : await fetch(`/api${path}`);
+      const res = isLoggedIn ? await apiFetch(path) : await fetch(`/api${path}`);
       const data = await res.json();
       setCategory(data.category || null);
       setPosts(data.posts || []);
@@ -47,9 +76,7 @@ export default function ForumCategory() {
     }
   }, [slug, page, sort, perPage, isLoggedIn, apiFetch]);
 
-  useEffect(() => {
-    loadPosts();
-  }, [loadPosts]);
+  useEffect(() => { loadPosts(); }, [loadPosts]);
 
   const handleSort = (newSort) => {
     setSort(newSort);
@@ -64,79 +91,141 @@ export default function ForumCategory() {
   };
 
   const canPost = isLoggedIn && category && (!category.officer_only || isOfficer());
-
   const sortOptions = [
     { key: 'hot', label: 'Hot' },
     { key: 'newest', label: 'New' },
     { key: 'top', label: 'Top' },
   ];
 
-  const cleanTitle = (value) => String(value || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
+  // Title band stats per-category
+  const stats = [
+    { value: String(category?.post_count ?? posts.length), label: 'Posts' },
+    { value: category?.officer_only ? 'Officer-only' : 'Public', label: 'Visibility' },
+    { value: pagination?.total != null ? String(pagination.total) : '—', label: 'Total threads' },
+    { value: sort === 'hot' ? 'Hot' : sort === 'newest' ? 'New' : 'Top', label: 'Sorted by' },
+  ];
+
+  const accent = category?.accent_color || null;
 
   return (
-    <>
-      <PageHero title={category?.name || 'Category'} subtitle={category?.description || ''} />
-      <section className="section">
-        <div className="container">
-          <Link to="/forum" className={styles.backLink}>&larr; Back to Forum</Link>
-
-          {/* Header */}
-          <div className={styles.header}>
-            <div className={styles.headerControls}>
-              <div className={styles.sort}>
-                {sortOptions.map(s => (
-                  <button
-                    key={s.key}
-                    className={sort === s.key ? styles.sortBtnActive : styles.sortBtn}
-                    onClick={() => handleSort(s.key)}
-                  >
-                    {s.label}
-                  </button>
-                ))}
+    <div className={styles.forumPage}>
+      <AgeGate
+        active={!!category?.age_restricted}
+        categoryId={category?.id}
+        categoryName={category?.name}
+      />
+      <header
+        className={styles.forumTitleBand}
+        style={accent ? { borderBottomColor: accent } : undefined}
+      >
+        <div className={styles.forumTitleBandInner}>
+          <span className={styles.forumEyebrow}>
+            {category?.officer_only ? 'Officer-only category' : 'Forum category'}
+          </span>
+          <div className={styles.forumCategoryTitleAccent}>
+            {category && (
+              <span
+                className={styles.forumCategoryTitleIcon}
+                style={accent ? { borderColor: accent } : undefined}
+                aria-hidden="true"
+              >
+                {category.icon || FALLBACK_ICONS[category.name] || '\u{1F4AC}'}
+              </span>
+            )}
+            <h1 className={styles.forumPageTitle}>
+              {category?.name || 'Category'}
+            </h1>
+          </div>
+          {category?.description && (
+            <p className={styles.forumPageSubtitle}>{category.description}</p>
+          )}
+          <div className={styles.forumStatsInline}>
+            {stats.map((s) => (
+              <div key={s.label} className={styles.forumStatsItem}>
+                <span className={styles.forumStatsValue}>{s.value}</span>
+                <span className={styles.forumStatsLabel}>{s.label}</span>
               </div>
-              <select className={styles.perPage} value={perPage} onChange={handlePerPage}>
-                <option value={10}>10</option>
-                <option value={15}>15</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div className={styles.forumLayout}>
+        <ForumSidebar categories={allCategories} activeCategoryId={slug} />
+
+        <main className={styles.forumContent}>
+          <Link to="/forum" className={styles.forumBackLink}>← Back to forum</Link>
+
+          {/* Toolbar: sort + per-page + new post */}
+          <div className={styles.forumToolbar}>
+            <div className={styles.forumSortGroup} role="tablist" aria-label="Sort posts">
+              {sortOptions.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={sort === s.key}
+                  className={sort === s.key ? styles.forumSortBtnActive : styles.forumSortBtn}
+                  onClick={() => handleSort(s.key)}
+                >
+                  {s.label}
+                </button>
+              ))}
             </div>
+            <select className={styles.forumPerPage} value={perPage} onChange={handlePerPage} aria-label="Posts per page">
+              <option value={10}>10 / page</option>
+              <option value={15}>15 / page</option>
+              <option value={20}>20 / page</option>
+              <option value={50}>50 / page</option>
+            </select>
             {canPost && (
-              <Link to={`/forum/new/${slug}`} className="btn btn--primary btn--sm">
+              <Link to={`/forum/new/${slug}`} className="btn btn--primary btn--sm" style={{ marginLeft: 'auto' }}>
                 New Post
               </Link>
             )}
           </div>
 
-          {/* Posts */}
+          {/* Post list */}
           {loading ? (
-            <p className={styles.empty}>Loading...</p>
+            <p className={styles.forumEmptyState}>Loading…</p>
           ) : posts.length === 0 ? (
-            <p className={styles.empty}>No posts yet. Be the first to post!</p>
+            <p className={styles.forumEmptyState}>No posts yet. Be the first to post!</p>
           ) : (
-            <div className={styles.postList}>
-              {posts.map(post => {
-                const displayName = post.display_name || post.username;
+            <div className={styles.forumPostList}>
+              {posts.map((post) => {
+                const displayName = authorDisplayName(post);
+                const profileLink = authorProfileLink(post);
+                const authorIsFormer = isFormerMember(post);
                 const netVotes = post.net_votes || 0;
-                const voteToneClass = netVotes > 0 ? styles.votePositive : netVotes < 0 ? styles.voteNegative : styles.voteNeutral;
-                const rowClass = post.pinned
-                  ? `${styles.postRowPinned}${post.locked ? ` ${styles.postRowLocked}` : ''}`
-                  : `${styles.postRow}${post.locked ? ` ${styles.postRowLocked}` : ''}`;
-
+                const voteCls = netVotes > 0 ? styles.forumPostStatPositive : netVotes < 0 ? styles.forumPostStatNegative : '';
+                const cls = post.pinned
+                  ? `${styles.forumPostRowPinned}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`
+                  : `${styles.forumPostRow}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`;
                 return (
-                  <Link key={post.id} to={`/forum/post/${post.id}`} className={rowClass}>
-                    <div className={styles.postRowTitle}>
-                      {cleanTitle(post.title)}
-                      {post.pinned && <span className={styles.pinnedTag}>[PINNED]</span>}
-                      {post.locked && <span className={styles.lockedTag}>[LOCKED]</span>}
+                  <Link key={post.id} to={`/forum/post/${post.id}`} className={cls}>
+                    <div className={styles.forumPostTitle}>
+                      {cleanForumTitle(post.title)}
+                      {post.pinned ? <span className={styles.forumPostTagPinned}>Pinned</span> : null}
+                      {post.locked ? <span className={styles.forumPostTagLocked}>Locked</span> : null}
                     </div>
-                    <div className={styles.postRowMeta}>
-                      <span className={`rank-badge rank-badge--${post.rank}`}>{post.rank}</span>
-                      {' '}<span className={styles.profileLink} onClick={(e) => { e.preventDefault(); navigate(`/profile?id=${post.user_id}`); }}>{displayName}</span> &bull; {timeAgo(post.created_at)}
-                      <span className={styles.inlineStats}>
-                        <span className={voteToneClass} title="Votes">&#9650; {netVotes}</span>
-                        <span title="Views">&#128065; {post.view_count || 0}</span>
-                        <span title="Replies">&#128172; {post.comment_count || 0}</span>
+                    <div className={styles.forumPostMeta}>
+                      {!authorIsFormer && <span className={`rank-badge rank-badge--${post.rank}`}>{post.display_rank || post.rank}</span>}
+                      {profileLink ? (
+                        <span
+                          className={styles.profileLink}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(profileLink); }}
+                        >
+                          {displayName}
+                        </span>
+                      ) : (
+                        <span className={styles.profileLink}>{displayName}</span>
+                      )}
+                      <span>·</span>
+                      <span>{timeAgo(post.created_at)}</span>
+                      <span className={styles.forumPostStats}>
+                        <span className={`${styles.forumPostStat} ${voteCls}`} title="Net votes">▲ {netVotes}</span>
+                        <span className={styles.forumPostStat} title="Views">{post.view_count || 0} views</span>
+                        <span className={styles.forumPostStat} title="Replies">{post.comment_count || 0} replies</span>
                       </span>
                     </div>
                   </Link>
@@ -147,11 +236,12 @@ export default function ForumCategory() {
 
           {/* Pagination */}
           {pagination && pagination.pages > 1 && (
-            <div className={styles.pagination}>
-              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map(p => (
+            <div className={styles.forumPagination}>
+              {Array.from({ length: pagination.pages }, (_, i) => i + 1).map((p) => (
                 <button
                   key={p}
-                  className={p === pagination.page ? styles.pageBtnActive : styles.pageBtn}
+                  type="button"
+                  className={p === pagination.page ? styles.forumPageBtnActive : styles.forumPageBtn}
                   onClick={() => setSearchParams({ page: String(p), sort })}
                 >
                   {p}
@@ -159,8 +249,8 @@ export default function ForumCategory() {
               ))}
             </div>
           )}
-        </div>
-      </section>
-    </>
+        </main>
+      </div>
+    </div>
   );
 }

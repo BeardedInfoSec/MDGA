@@ -45,7 +45,8 @@ export default function AdminLogin() {
 
       if (res.ok) {
         login(data.token, data.user);
-        navigate('/admin', { replace: true });
+        window.location.assign('/admin');
+        return;
       } else {
         setError(data.error || 'Login failed.');
       }

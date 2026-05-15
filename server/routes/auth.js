@@ -83,6 +83,7 @@ router.post('/login', async (req, res) => {
         username: user.username,
         displayName: user.display_name,
         rank: user.rank,
+        displayRank: user.display_rank || null,
         avatarUrl: user.avatar_url,
         realm: user.realm,
         characterName: user.character_name,
@@ -208,18 +209,33 @@ router.post('/companion-token', requireAuth, async (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, async (req, res) => {
+  // Pull the faction of the user's main character so the UI can theme itself
+  // (e.g. swap the MDGA logo for the MEGA logo when the main is Alliance).
+  // Falls back to null if the user hasn't picked a main yet.
+  let mainFaction = null;
+  try {
+    const [rows] = await pool.execute(
+      'SELECT faction FROM user_characters WHERE user_id = ? AND is_main = TRUE LIMIT 1',
+      [req.user.id]
+    );
+    mainFaction = rows[0]?.faction || null;
+  } catch (err) {
+    console.warn('[/auth/me] main faction lookup failed:', err.message);
+  }
   res.json({
     user: {
       id: req.user.id,
       username: req.user.username,
       displayName: req.user.display_name,
       rank: req.user.rank,
+      displayRank: req.user.display_rank || null,
       avatarUrl: req.user.avatar_url,
       realm: req.user.realm,
       characterName: req.user.character_name,
       timezone: req.user.timezone,
       permissions: req.user.permissions || [],
+      mainFaction,
     },
   });
 });

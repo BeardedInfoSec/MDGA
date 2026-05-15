@@ -660,7 +660,12 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
       ? Math.min(Math.max(Math.trunc(limitValue), 1), MAX_REPORT_ROWS)
       : DEFAULT_GUILD_GAP_LIMIT;
     const limit = exportAll ? MAX_EXPORT_ROWS : requestedLimit;
-    const guildIdRaw = Number(req.query.guild_id || 0);
+    // ?guild_id=all  → scan every federation guild (no primary filter)
+    // ?guild_id=<n>  → scan that guild
+    // omitted/0      → fall back to primary guild only (existing behavior)
+    const guildIdParam = String(req.query.guild_id || '').trim().toLowerCase();
+    const aggregateAll = guildIdParam === 'all';
+    const guildIdRaw = aggregateAll ? 0 : Number(req.query.guild_id || 0);
     const guildId = Number.isFinite(guildIdRaw) && guildIdRaw > 0 ? Math.trunc(guildIdRaw) : null;
     const linkState = GUILD_GAP_LINK_STATES.has(linkStateRaw) ? linkStateRaw : 'needs_discord';
 
@@ -688,9 +693,10 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
     if (guildId) {
       filters.push('gm.guild_id = ?');
       params.push(guildId);
-    } else {
+    } else if (!aggregateAll) {
       filters.push('g.is_primary = TRUE');
     }
+    // aggregateAll → no guild filter (scan every federation guild)
 
     if (q) {
       const term = `%${q.replace(/[%_\\]/g, '\\$&')}%`;

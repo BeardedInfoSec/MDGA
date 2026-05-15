@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
+const { logAdminAction } = require('../services/audit-log');
 
 const router = express.Router();
 
@@ -41,8 +42,14 @@ router.get('/categories', async (req, res) => {
     const viewer = await getOptionalActiveUser(req);
     const whereClause = hasOfficerCategoryAccess(viewer) ? '' : 'WHERE fc.officer_only = 0';
 
+    // Explicit column list (instead of fc.*) so a future migration that
+    // adds new columns doesn't get masked by mysql2's prepared-statement
+    // metadata cache — added columns silently disappear from API responses
+    // until the cache invalidates. Bit me on migration-044.
     const [categories] = await pool.execute(`
-      SELECT fc.*,
+      SELECT
+        fc.id, fc.name, fc.description, fc.sort_order, fc.created_by, fc.created_at,
+        fc.officer_only, fc.age_restricted, fc.icon, fc.accent_color, fc.banner_url,
         (SELECT COUNT(*) FROM forum_posts fp WHERE fp.category_id = fc.id) AS post_count,
         (SELECT fp2.title FROM forum_posts fp2 WHERE fp2.category_id = fc.id ORDER BY fp2.created_at DESC LIMIT 1) AS latest_post_title,
         (SELECT fp3.created_at FROM forum_posts fp3 WHERE fp3.category_id = fc.id ORDER BY fp3.created_at DESC LIMIT 1) AS latest_post_date
@@ -78,7 +85,10 @@ router.get('/search', async (req, res) => {
 
     const [posts] = await pool.execute(`
       SELECT DISTINCT fp.id, fp.title, fp.category_id, fp.created_at, fp.view_count, fp.pinned, fp.locked,
-        u.username, u.display_name, u.\`rank\`,
+        fp.user_id,
+        u.username, u.display_name, u.\`rank\`, u.display_rank, u.character_name,
+        u.status AS user_status,
+        uc_main.character_name AS main_character_name,
         fc_cat.name AS category_name,
         (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
@@ -90,6 +100,7 @@ router.get('/search', async (req, res) => {
         END AS match_type
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
+      LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN forum_comments fc_match ON fc_match.post_id = fp.id AND fc_match.content LIKE ?
       LEFT JOIN (
@@ -109,24 +120,100 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// Validators shared by POST and PUT. Keep these tight — categories are
+// rendered everywhere on the forum so a bad value here breaks the index.
+function normalizeCategoryPayload(body) {
+  const errors = [];
+  const name = (body.name || '').trim();
+  const description = (body.description || '').trim();
+  const icon = body.icon == null ? null : String(body.icon).trim().slice(0, 50) || null;
+  const accent = body.accent_color == null ? null : String(body.accent_color).trim();
+  const banner = body.banner_url == null ? null : String(body.banner_url).trim().slice(0, 500) || null;
+  const sortOrder = Number.isFinite(Number(body.sort_order ?? body.sortOrder)) ? parseInt(body.sort_order ?? body.sortOrder, 10) : 0;
+  const officerOnly = body.officer_only === true || body.officer_only === 1 || body.officer_only === '1' ? 1 : 0;
+  const ageRestricted = body.age_restricted === true || body.age_restricted === 1 || body.age_restricted === '1' ? 1 : 0;
+
+  if (!name) errors.push('Category name is required');
+  if (name.length > 100) errors.push('Category name must be 100 characters or fewer');
+  if (description.length > 500) errors.push('Description must be 500 characters or fewer');
+  if (accent && !/^#[0-9a-fA-F]{6}$/.test(accent)) errors.push('Accent color must be #RRGGBB');
+
+  return {
+    errors,
+    payload: { name, description, icon, accent_color: accent || null, banner_url: banner, sort_order: sortOrder, officer_only: officerOnly, age_restricted: ageRestricted },
+  };
+}
+
 // POST /api/forum/categories
 router.post('/categories', requireAuth, requirePermission('forum.manage_categories'), async (req, res) => {
   try {
-    const { name, description, sortOrder } = req.body;
-    if (!name) return res.status(400).json({ error: 'Category name is required' });
+    const { errors, payload } = normalizeCategoryPayload(req.body);
+    if (errors.length) return res.status(400).json({ error: errors[0], errors });
 
-    // Check for duplicate category name
-    const [existing] = await pool.execute('SELECT id FROM forum_categories WHERE name = ?', [name]);
+    const [existing] = await pool.execute('SELECT id FROM forum_categories WHERE name = ?', [payload.name]);
     if (existing.length > 0) return res.status(409).json({ error: 'A category with that name already exists' });
 
     const [result] = await pool.execute(
-      'INSERT INTO forum_categories (name, description, sort_order, created_by) VALUES (?, ?, ?, ?)',
-      [name, description || '', sortOrder || 0, req.user.id]
+      `INSERT INTO forum_categories
+         (name, description, sort_order, created_by, officer_only, age_restricted, icon, accent_color, banner_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [payload.name, payload.description, payload.sort_order, req.user.id, payload.officer_only,
+       payload.age_restricted, payload.icon, payload.accent_color, payload.banner_url]
     );
     res.status(201).json({ id: result.insertId, message: 'Category created' });
   } catch (err) {
     console.error('Create category error:', err);
     res.status(500).json({ error: 'Failed to create category' });
+  }
+});
+
+// PUT /api/forum/categories/:id — full replace of category settings.
+router.put('/categories/:id', requireAuth, requirePermission('forum.manage_categories'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid category id' });
+
+    const { errors, payload } = normalizeCategoryPayload(req.body);
+    if (errors.length) return res.status(400).json({ error: errors[0], errors });
+
+    // Block name collision against another row (the unique index would catch
+    // this too but we want a friendly message, not a 500).
+    const [collision] = await pool.execute(
+      'SELECT id FROM forum_categories WHERE name = ? AND id != ?',
+      [payload.name, id]
+    );
+    if (collision.length > 0) return res.status(409).json({ error: 'A category with that name already exists' });
+
+    const [result] = await pool.execute(
+      `UPDATE forum_categories
+         SET name = ?, description = ?, sort_order = ?, officer_only = ?, age_restricted = ?,
+             icon = ?, accent_color = ?, banner_url = ?
+       WHERE id = ?`,
+      [payload.name, payload.description, payload.sort_order, payload.officer_only, payload.age_restricted,
+       payload.icon, payload.accent_color, payload.banner_url, id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Category not found' });
+    res.json({ message: 'Category updated' });
+  } catch (err) {
+    console.error('Update category error:', err);
+    res.status(500).json({ error: 'Failed to update category' });
+  }
+});
+
+// DELETE /api/forum/categories/:id — hard delete. Posts/comments cascade
+// via the existing FK ON DELETE CASCADE, which is intentional: deleting a
+// category should remove its content. Add a confirmation guard in the UI.
+router.delete('/categories/:id', requireAuth, requirePermission('forum.manage_categories'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid category id' });
+
+    const [result] = await pool.execute('DELETE FROM forum_categories WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Category not found' });
+    res.json({ message: 'Category deleted' });
+  } catch (err) {
+    console.error('Delete category error:', err);
+    res.status(500).json({ error: 'Failed to delete category' });
   }
 });
 
@@ -162,13 +249,17 @@ router.get('/categories/:id/posts', async (req, res) => {
     }
 
     const [posts] = await pool.execute(`
-      SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.realm, u.character_name,
+      SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
+        u.status AS user_status,
+        uc_main.character_name AS main_character_name,
+        uc_main.realm_slug AS main_realm_slug,
         (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         COALESCE(vote_sum.upvotes, 0) AS upvotes,
         COALESCE(vote_sum.downvotes, 0) AS downvotes
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
+      LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN (
         SELECT post_id,
           SUM(vote) AS net_votes,
@@ -176,13 +267,13 @@ router.get('/categories/:id/posts', async (req, res) => {
           SUM(CASE WHEN vote = -1 THEN 1 ELSE 0 END) AS downvotes
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
-      WHERE fp.category_id = ?
+      WHERE fp.category_id = ? AND fp.deleted_at IS NULL
       ORDER BY ${orderClause}
       LIMIT ${limit} OFFSET ${offset}
     `, [req.params.id]);
 
     const [countResult] = await pool.execute(
-      'SELECT COUNT(*) AS total FROM forum_posts WHERE category_id = ?',
+      'SELECT COUNT(*) AS total FROM forum_posts WHERE category_id = ? AND deleted_at IS NULL',
       [req.params.id]
     );
 
@@ -240,13 +331,18 @@ router.get('/posts/:id', async (req, res) => {
     let userVote = 0;
 
     const [postRows] = await pool.execute(`
-      SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.realm, u.character_name,
-        fc_cat.officer_only,
+      SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
+        u.status AS user_status,
+        uc_main.character_name AS main_character_name,
+        uc_main.realm_slug AS main_realm_slug,
+        fc_cat.officer_only, fc_cat.age_restricted AS category_age_restricted,
+        fc_cat.name AS category_name,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         COALESCE(vote_sum.upvotes, 0) AS upvotes,
         COALESCE(vote_sum.downvotes, 0) AS downvotes
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
+      LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN (
         SELECT post_id,
@@ -255,7 +351,7 @@ router.get('/posts/:id', async (req, res) => {
           SUM(CASE WHEN vote = -1 THEN 1 ELSE 0 END) AS downvotes
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
-      WHERE fp.id = ?
+      WHERE fp.id = ? AND fp.deleted_at IS NULL
     `, [req.params.id]);
 
     if (postRows.length === 0) {
@@ -286,13 +382,17 @@ router.get('/posts/:id', async (req, res) => {
     }
 
     const [comments] = await pool.execute(`
-      SELECT fc.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.realm, u.character_name,
+      SELECT fc.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
+        u.status AS user_status,
+        uc_main.character_name AS main_character_name,
+        uc_main.realm_slug AS main_realm_slug,
         COALESCE(comment_vote_sum.net_votes, 0) AS net_votes,
         COALESCE(comment_vote_sum.upvotes, 0) AS upvotes,
         COALESCE(comment_vote_sum.downvotes, 0) AS downvotes,
         COALESCE(comment_user_vote.vote, 0) AS user_vote
       FROM forum_comments fc
       JOIN users u ON fc.user_id = u.id
+      LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN (
         SELECT comment_id,
           SUM(vote) AS net_votes,
@@ -304,7 +404,7 @@ router.get('/posts/:id', async (req, res) => {
       LEFT JOIN forum_comment_votes comment_user_vote
         ON comment_user_vote.comment_id = fc.id
         AND comment_user_vote.user_id = ?
-      WHERE fc.post_id = ?
+      WHERE fc.post_id = ? AND fc.deleted_at IS NULL
       ORDER BY fc.created_at ASC
     `, [viewerUserId || 0, req.params.id]);
 
@@ -584,17 +684,32 @@ router.post('/comments/:id/report', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/forum/posts/:id
+// DELETE /api/forum/posts/:id — soft delete: row is moved to the recycle
+// bin (deleted_at set) so admins can restore. Frontend listing endpoints
+// already filter on deleted_at IS NULL via the WHERE clauses above.
 router.delete('/posts/:id', requireAuth, async (req, res) => {
   try {
-    const [postRows] = await pool.execute('SELECT user_id FROM forum_posts WHERE id = ?', [req.params.id]);
+    const [postRows] = await pool.execute(
+      'SELECT user_id FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
+      [req.params.id]
+    );
     if (postRows.length === 0) return res.status(404).json({ error: 'Post not found' });
     const isOwner = postRows[0].user_id === req.user.id;
     const canDeleteAny = req.user.rank === 'guildmaster' ||
       (req.user.permissions && req.user.permissions.includes('forum.delete_any_post'));
     if (!isOwner && !canDeleteAny) return res.status(403).json({ error: 'Not authorized' });
 
-    await pool.execute('DELETE FROM forum_posts WHERE id = ?', [req.params.id]);
+    await pool.execute(
+      'UPDATE forum_posts SET deleted_at = NOW(), deleted_by = ? WHERE id = ?',
+      [req.user.id, req.params.id]
+    );
+    if (!isOwner || canDeleteAny) {
+      logAdminAction({
+        adminUserId: req.user.id, actionType: 'post.delete',
+        targetType: 'forum_post', targetId: parseInt(req.params.id, 10),
+        summary: `Soft-deleted post #${req.params.id}`,
+      });
+    }
     res.json({ message: 'Post deleted' });
   } catch (err) {
     console.error('Delete post error:', err);
@@ -602,21 +717,89 @@ router.delete('/posts/:id', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/forum/comments/:id
+// DELETE /api/forum/comments/:id — soft delete (see DELETE post comment above).
 router.delete('/comments/:id', requireAuth, async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT user_id FROM forum_comments WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.execute(
+      'SELECT user_id FROM forum_comments WHERE id = ? AND deleted_at IS NULL',
+      [req.params.id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Comment not found' });
     const isOwner = rows[0].user_id === req.user.id;
     const canDeleteAny = req.user.rank === 'guildmaster' ||
       (req.user.permissions && req.user.permissions.includes('forum.delete_any_comment'));
     if (!isOwner && !canDeleteAny) return res.status(403).json({ error: 'Not authorized' });
 
-    await pool.execute('DELETE FROM forum_comments WHERE id = ?', [req.params.id]);
+    await pool.execute(
+      'UPDATE forum_comments SET deleted_at = NOW(), deleted_by = ? WHERE id = ?',
+      [req.user.id, req.params.id]
+    );
+    if (!isOwner || canDeleteAny) {
+      logAdminAction({
+        adminUserId: req.user.id, actionType: 'comment.delete',
+        targetType: 'forum_comment', targetId: parseInt(req.params.id, 10),
+        summary: `Soft-deleted comment #${req.params.id}`,
+      });
+    }
     res.json({ message: 'Comment deleted' });
   } catch (err) {
     console.error('Delete comment error:', err);
     res.status(500).json({ error: 'Failed to delete comment' });
+  }
+});
+
+// PUT /api/forum/posts/:id — edit title/content. Author can edit their own
+// post; users with forum.delete_any_post can edit anyone's. Each edit
+// snapshots the previous title+content into forum_post_revisions so admins
+// can review the history and audit moderation rewrites.
+router.put('/posts/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid post id' });
+
+    const [[existing]] = await pool.execute(
+      'SELECT id, user_id, title, content FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Post not found' });
+
+    const isOwner = existing.user_id === req.user.id;
+    const canEditAny = req.user.rank === 'guildmaster' ||
+      (req.user.permissions && req.user.permissions.includes('forum.delete_any_post'));
+    if (!isOwner && !canEditAny) return res.status(403).json({ error: 'Not authorized' });
+
+    const CTRL = new RegExp('[\u0000-\u001F\u007F]', 'g');
+    const cleanTitle = String(req.body.title ?? existing.title).replace(CTRL, '').trim();
+    const cleanContent = String(req.body.content ?? existing.content).replace(CTRL, '').trim();
+    if (!cleanTitle || !cleanContent) {
+      return res.status(400).json({ error: 'Title and content are required' });
+    }
+    if (cleanTitle.length > 200) return res.status(400).json({ error: 'Title too long' });
+
+    const titleChanged = cleanTitle !== existing.title;
+    const contentChanged = cleanContent !== existing.content;
+    if (!titleChanged && !contentChanged) return res.json({ message: 'No changes' });
+
+    await pool.execute(
+      'INSERT INTO forum_post_revisions (post_id, edited_by, previous_title, previous_content) VALUES (?, ?, ?, ?)',
+      [id, req.user.id, existing.title, existing.content]
+    );
+    await pool.execute(
+      'UPDATE forum_posts SET title = ?, content = ?, updated_at = NOW() WHERE id = ?',
+      [cleanTitle, cleanContent, id]
+    );
+
+    if (!isOwner) {
+      logAdminAction({
+        adminUserId: req.user.id, actionType: 'post.edit',
+        targetType: 'forum_post', targetId: id,
+        summary: `Edited post #${id} (${titleChanged ? 'title+' : ''}${contentChanged ? 'body' : ''})`,
+      });
+    }
+    res.json({ message: 'Post updated' });
+  } catch (err) {
+    console.error('Edit post error:', err);
+    res.status(500).json({ error: 'Failed to update post' });
   }
 });
 

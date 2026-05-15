@@ -38,7 +38,7 @@ async function requireAuth(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const [rows] = await pool.execute(
-      'SELECT id, username, display_name, `rank`, status, avatar_url, realm, character_name, discord_id, discord_username, timezone FROM users WHERE id = ?',
+      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone, account_locked_at, account_locked_until, account_locked_reason FROM users WHERE id = ?',
       [decoded.id]
     );
     if (rows.length === 0) {
@@ -46,6 +46,20 @@ async function requireAuth(req, res, next) {
     }
     if (rows[0].status !== 'active') {
       return res.status(403).json({ error: 'Account not active', status: rows[0].status });
+    }
+    // Account lock check. NULL until = indefinite; future until = timed lock.
+    // Past until = expired lock, treat as unlocked (lazy-clear is fine; a
+    // separate sweeper isn't needed because locked rows are rare).
+    if (rows[0].account_locked_at) {
+      const until = rows[0].account_locked_until ? new Date(rows[0].account_locked_until) : null;
+      if (!until || until.getTime() > Date.now()) {
+        return res.status(403).json({
+          error: 'Account locked',
+          status: 'locked',
+          lockedUntil: until ? until.toISOString() : null,
+          lockedReason: rows[0].account_locked_reason || null,
+        });
+      }
     }
     req.user = rows[0];
 
@@ -55,6 +69,32 @@ async function requireAuth(req, res, next) {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
+
+// Like requireAuth but never 401s. If a valid token is present, populates
+// req.user (including permissions). If not, leaves req.user undefined and
+// continues. Used by endpoints that have a public read mode but want to
+// branch on identity (e.g., leaderboards anonymizing for non-members).
+async function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const [rows] = await pool.execute(
+      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone FROM users WHERE id = ?',
+      [decoded.id]
+    );
+    if (rows.length > 0 && rows[0].status === 'active') {
+      req.user = rows[0];
+      req.user.permissions = await loadUserPermissions(req.user.id);
+    }
+  } catch {
+    // Invalid token → treat as anonymous, no error
+  }
+  next();
 }
 
 // Backward-compatible: checks rank OR permissions
@@ -92,4 +132,4 @@ function requirePermission(...perms) {
   };
 }
 
-module.exports = { signToken, loadUserPermissions, requireAuth, requireOfficer, requireGuildMaster, requirePermission };
+module.exports = { signToken, loadUserPermissions, requireAuth, optionalAuth, requireOfficer, requireGuildMaster, requirePermission };

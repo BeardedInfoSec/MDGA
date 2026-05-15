@@ -6,3 +6,20 @@ node_modules/
 
 # User uploads
 uploads/
+
+# Dev/diagnostic scripts — these embed the SSH passphrase and prod
+# credentials as literals, must never be committed.
+tools/
+
+# Member audit data (PII / Discord IDs) — operational, not source.
+MDGA_Audit_Log.xlsx
+
+# Local worktree state
+.claude/
+
+# Stray PNGs at the repo root (real assets live in images/)
+/nemy.png
+/MDGA.png
+/MDGA_ballon.png
+/MEGA_Logo.png
+/icon.png

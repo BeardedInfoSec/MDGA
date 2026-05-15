@@ -1,17 +1,133 @@
-.loginBox {
-  max-width: 400px;
-  margin: 0 auto;
-  background: var(--color-gray-900);
-  border: 1px solid var(--color-gray-700);
-  border-radius: var(--border-radius-md);
-  padding: var(--space-8);
-  box-shadow: var(--shadow-card);
+/* ──────────────────────────────────────────────────────────────────────
+ * Login page — cinematic split layout.
+ *   Left pane: full-bleed atmospheric image with dark scrim + brand + quote
+ *   Right pane: centered form (sign-in OR Discord-invite, depending on state)
+ * ──────────────────────────────────────────────────────────────────── */
+
+.page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: calc(100vh - var(--nav-height, 70px));
+  background: var(--color-black);
 }
 
-.loginBox h2 {
-  text-align: center;
-  margin-bottom: var(--space-6);
+/* ── Left: image pane ── */
+.imagePane {
+  position: relative;
+  background-color: var(--color-black);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-8);
+  overflow: hidden;
+  min-height: 320px;
 }
+
+.imageScrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.85) 100%),
+    radial-gradient(ellipse at center, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.55) 80%);
+  pointer-events: none;
+}
+
+.imageContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  width: 100%;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  color: var(--color-gold);
+  letter-spacing: 4px;
+  text-shadow: 0 0 22px rgba(212, 175, 55, 0.35), 0 4px 20px rgba(0, 0, 0, 0.85);
+}
+
+.quote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 540px;
+}
+
+.quoteText {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  line-height: 1.25;
+  color: var(--color-parchment-light);
+  font-style: italic;
+  margin: 0;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.85);
+}
+
+.quoteAuthor {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 4px;
+  color: var(--color-gold-dark);
+}
+
+/* ── Right: form pane ── */
+.formPane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-6);
+  background: var(--color-black);
+}
+
+.formInner {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.eyebrow {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 5px;
+  color: var(--color-gold);
+  padding: 3px 10px;
+  border: 1px solid var(--color-gold-dark);
+  align-self: flex-start;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.5vw, 2.6rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-shadow: 0 0 22px rgba(212, 175, 55, 0.25);
+}
+
+.lede {
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.alertWrap { margin-top: var(--space-1); }
 
 .discordIcon {
   width: 1.25em;
@@ -20,96 +136,107 @@
   margin-right: 0.5em;
 }
 
-.loginBox :global(.m-alert) {
-  margin-bottom: var(--space-4);
-}
-
-.signupLink {
-  text-align: center;
-  margin-top: var(--space-4);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.signupLink a {
-  color: var(--color-gold);
-}
-
-/* Discord invite banner for approved users not in server */
-.inviteBanner {
-  max-width: 500px;
-  margin: 0 auto;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  border: 1px solid #5865F2;
-  border-radius: var(--border-radius-md);
-  padding: var(--space-8);
-  text-align: center;
-}
-
-.inviteBanner h2 {
-  color: #34D399;
-  margin-bottom: var(--space-2);
-}
-
-.inviteSubtext {
-  color: var(--color-text-secondary);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-  margin-bottom: var(--space-6);
-  line-height: 1.6;
-}
-
-.emailNotice {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  background: rgba(245, 197, 24, 0.1);
-  border: 1px solid rgba(245, 197, 24, 0.3);
-  border-radius: var(--border-radius-sm);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-6);
-  color: #F5C518;
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-}
-
-.emailIcon {
-  font-size: 1.2em;
-  flex-shrink: 0;
-}
-
-.discordInviteBtn {
+/* Discord button (used in the "needs Discord" state) */
+.discordBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5em;
+  gap: var(--space-2);
   width: 100%;
-  padding: 14px 24px;
-  background: #5865F2;
+  padding: 12px 20px;
+  background: var(--color-discord);
   color: white;
   text-decoration: none;
   border-radius: var(--border-radius-sm);
-  font-weight: 600;
-  font-size: 1.1rem;
   font-family: var(--font-ui);
-  transition: background 0.2s;
+  font-weight: 700;
+  font-size: var(--font-size-base);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
-.discordInviteBtn:hover {
-  background: #4752c4;
+.discordBtn:hover {
+  background: var(--color-info-dark);
   color: white;
+  transform: translateY(-1px);
 }
 
-.continueLink {
-  display: block;
-  margin-top: var(--space-4);
-  color: var(--color-text-secondary);
+.discordBtn svg { width: 18px; height: 18px; fill: white; margin: 0; }
+
+/* Email-pickup notice (Discord-invite state) */
+.emailNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(184, 148, 31, 0.08);
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
   font-family: var(--font-ui);
   font-size: var(--font-size-sm);
+  color: var(--color-gold);
 }
 
+.emailNotice > span:first-child { font-size: 1.1em; flex-shrink: 0; color: var(--color-gold); }
+
+/* Footer-ish links inside the form */
+.signupLink,
+.continueLink,
+.fineprint {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.signupLink a,
 .continueLink a {
   color: var(--color-gold);
+  text-decoration: none;
+}
+
+.signupLink a:hover,
+.continueLink a:hover {
+  color: var(--color-gold-light);
+  text-decoration: underline;
+}
+
+.continueLink { margin-top: var(--space-2); }
+
+.fineprint {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .page {
+    grid-template-columns: 1fr;
+    grid-template-rows: 240px 1fr;
+  }
+  .imagePane {
+    padding: var(--space-5);
+    min-height: 240px;
+  }
+  .quote { max-width: none; }
+  .quoteText { font-size: var(--font-size-lg); }
+  .formPane {
+    padding: var(--space-6) var(--space-4);
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .imagePane {
+    padding: var(--space-4);
+    min-height: 200px;
+  }
+  .brand {
+    font-size: var(--font-size-xl);
+    letter-spacing: 3px;
+  }
+  .quoteText { font-size: var(--font-size-base); }
 }

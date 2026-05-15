@@ -14,21 +14,34 @@ const RANK_PRIORITY = ['recruit', 'member', 'veteran', 'officer', 'guildmaster']
  */
 async function syncUserRolesFromDiscord(userId, discordMember) {
   // Load current user data
-  const [userRows] = await pool.execute('SELECT id, `rank`, status FROM users WHERE id = ?', [userId]);
+  const [userRows] = await pool.execute(
+    'SELECT id, `rank`, display_rank, status, rank_locked FROM users WHERE id = ?',
+    [userId]
+  );
   if (userRows.length === 0) return { rank: null, rolesAdded: 0, rolesRemoved: 0, changed: false };
   const user = userRows[0];
 
   // Only sync active users
   if (user.status !== 'active') return { rank: user.rank, rolesAdded: 0, rolesRemoved: 0, changed: false };
 
+  // Honor the manual-override flag: if an admin has locked this user's rank,
+  // skip the rank-recompute path entirely. RBAC role syncing below still
+  // runs so Discord role-driven RBAC stays current. Ban/leave still triggers
+  // suspension via bot.js's guildMemberRemove handler regardless of the lock.
+  const rankLocked = !!user.rank_locked;
+
   // Load all discord_role_mappings
   const [roleMappings] = await pool.execute(
-    'SELECT discord_role_id, site_rank, site_role_id FROM discord_role_mappings'
+    'SELECT discord_role_id, discord_role_name, site_rank, site_role_id FROM discord_role_mappings'
   );
 
   let newRank = 'member';
   let highestPriority = RANK_PRIORITY.indexOf('member');
   let rankMappingMatched = false;
+  // Track the discord_role_name of the highest-priority match — used as the
+  // display_rank so the badge shows the authentic guild rank label
+  // (Honorbound, Champion, etc.) instead of the generic 5-tier value.
+  let newDisplayRank = null;
   const autoRoleIds = new Set();
 
   for (const mapping of roleMappings) {
@@ -39,6 +52,7 @@ async function syncUserRolesFromDiscord(userId, discordMember) {
         if (priority > highestPriority) {
           highestPriority = priority;
           newRank = mapping.site_rank;
+          newDisplayRank = mapping.discord_role_name || null;
         }
       }
       if (mapping.site_role_id) {
@@ -50,6 +64,7 @@ async function syncUserRolesFromDiscord(userId, discordMember) {
   // If no role mapping matched, keep existing rank
   if (!rankMappingMatched) {
     newRank = user.rank || 'member';
+    newDisplayRank = user.display_rank || null;
   }
 
   // Also check roles table for direct discord_role_id links
@@ -62,10 +77,17 @@ async function syncUserRolesFromDiscord(userId, discordMember) {
     }
   }
 
-  // Update rank if changed
+  // Update rank if changed (unless this user's rank is locked).
   const rankChanged = newRank !== user.rank;
-  if (rankChanged) {
-    await pool.execute('UPDATE users SET `rank` = ? WHERE id = ?', [newRank, userId]);
+  const displayRankChanged = newDisplayRank !== user.display_rank;
+  if ((rankChanged || displayRankChanged) && !rankLocked) {
+    await pool.execute(
+      'UPDATE users SET `rank` = ?, display_rank = ? WHERE id = ?',
+      [newRank, newDisplayRank, userId]
+    );
+  }
+  if (rankChanged && rankLocked) {
+    console.log(`[discord-role-sync] Skipping rank change for user ${userId}: locked (would have been ${user.rank} → ${newRank})`);
   }
 
   // Sync RBAC roles
@@ -110,11 +132,12 @@ async function syncUserRolesFromDiscord(userId, discordMember) {
   }
 
   return {
-    rank: newRank,
+    rank: rankLocked ? user.rank : newRank,
+    displayRank: rankLocked ? user.display_rank : newDisplayRank,
     previousRank: user.rank,
     rolesAdded,
     rolesRemoved,
-    changed: rankChanged || rolesAdded > 0 || rolesRemoved > 0,
+    changed: (rankChanged && !rankLocked) || displayRankChanged || rolesAdded > 0 || rolesRemoved > 0,
   };
 }
 

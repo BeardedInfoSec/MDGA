@@ -1,0 +1,582 @@
+/* ──────────────────────────────────────────────────────────────────────
+ * PeopleMembers
+ * Standalone styling for the Members section. All design tokens come
+ * from variables.css — no hardcoded greys or hex literals.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: var(--container-max);
+  width: 100%;
+}
+
+.helper {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  max-width: 70ch;
+  line-height: var(--line-height-normal);
+}
+
+/* Each subsection (Currently overridden / Find a member) gets its own
+   header strip + content container so the page reads as two distinct
+   panels without heavy borders. */
+.subsection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.subsectionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-gray-800);
+  color: var(--color-gold);
+}
+
+.subsectionHeader svg { color: var(--color-gold); }
+
+.subsectionTitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-gold);
+  margin: 0;
+}
+
+.subsectionCount {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+}
+
+.subsectionEmpty {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  font-style: italic;
+}
+
+.resultsHint {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.loadingText {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.emptyTextLarge {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Identity-row chips that signal whether a member is auto-synced from
+   Discord or has a manual admin override in place. */
+.overrideBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-gold);
+  background: rgba(212, 160, 23, 0.14);
+  border: 1px solid var(--color-gold-dark);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.syncBadge {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ── Header ── */
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-3xl);
+  color: var(--color-text-heading);
+  margin: 0;
+  line-height: var(--line-height-tight);
+}
+
+.subtitle {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  max-width: 60ch;
+}
+
+.searchWrap {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  flex: 0 0 auto;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.search {
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  transition: border-color var(--transition-fast);
+}
+
+.search::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.search:focus {
+  outline: none;
+  border-color: var(--color-red);
+}
+
+/* ── List + rows ── */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+  background: var(--color-black-soft);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-gray-800);
+  transition: background var(--transition-fast);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ── Identity column (avatar + name + handle) ── */
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  flex-shrink: 0;
+}
+
+.avatarFallback {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nameBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: var(--line-height-tight);
+}
+
+.displayName {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--color-gold);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--transition-fast);
+}
+
+.displayName:hover {
+  color: var(--color-gold-light);
+  text-decoration: underline;
+}
+
+.username {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Cell labels (above each editable control) ── */
+.cellLabel {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+/* ── Roles cell ── */
+.rolesCell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.roleChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.roleChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.roleDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-gray-400);
+}
+
+.roleChipsEmpty {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* ── Rank cell (select + lock toggle) ── */
+
+.rankCell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rankCellControls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rankSelect {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-transform: capitalize;
+  transition: border-color var(--transition-fast);
+}
+
+.rankSelect:hover:not(:disabled) {
+  border-color: var(--color-gray-400);
+}
+
+.rankSelect:focus {
+  outline: none;
+  border-color: var(--color-red);
+}
+
+.rankSelect:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rankSelect option {
+  background: var(--color-gray-900);
+  color: var(--color-text-primary);
+}
+
+.lockButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--border-radius-md);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+  line-height: 1;
+}
+
+.lockButton:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+}
+
+.lockButton:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.lockButtonLocked {
+  color: var(--color-gold);
+}
+
+.lockButtonLocked:hover {
+  color: var(--color-gold-light);
+  background: rgba(255, 224, 51, 0.08);
+}
+
+/* ── Actions column ── */
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* The global .btn--sm doesn't pad icon-text combos, so keep them aligned. */
+.actions :global(.btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Empty state ── */
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-4);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.emptyIcon {
+  color: var(--color-gray-700);
+}
+
+.emptyText {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* ── Skeletons ── */
+
+.skeletonRow {
+  pointer-events: none;
+}
+
+@keyframes pmShimmer {
+  0% { opacity: 0.5; }
+  50% { opacity: 0.85; }
+  100% { opacity: 0.5; }
+}
+
+.skeletonAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-gray-800);
+  animation: pmShimmer 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.skeletonLine {
+  height: 12px;
+  width: 70%;
+  background: var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  animation: pmShimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonLineShort {
+  height: 10px;
+  width: 40%;
+  background: var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  margin-top: var(--space-2);
+  animation: pmShimmer 1.4s ease-in-out infinite;
+}
+
+.skeletonPill {
+  height: 28px;
+  width: 96px;
+  background: var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  animation: pmShimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .searchWrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .row {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .rankCell {
+    justify-content: flex-start;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Pagination footer — total count + prev/next */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4, 1rem);
+  margin-top: var(--space-4, 1rem);
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  border-top: 1px solid var(--color-gray-800);
+  flex-wrap: wrap;
+}
+
+.paginationInfo {
+  font-family: var(--font-ui);
+  font-size: 0.825rem;
+  color: var(--color-text-secondary);
+}
+
+.paginationControls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3, 0.75rem);
+}
+
+.paginationPage {
+  font-family: var(--font-ui);
+  font-size: 0.825rem;
+  color: var(--color-text-primary);
+  padding: 0 var(--space-2, 0.5rem);
+}

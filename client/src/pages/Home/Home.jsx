@@ -22,7 +22,18 @@ export default function Home() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
   const [carouselImages, setCarouselImages] = useState([]);
-  const [homeBackgroundUrl, setHomeBackgroundUrl] = useState(DEFAULT_HOME_BACKGROUND_IMAGE);
+  // Cache the last-known background URL so subsequent hard refreshes
+  // hydrate with the *current* background instantly. Without this, the
+  // initial state defaults to the hardcoded image and the user sees a
+  // flash of the old background before the API response replaces it.
+  const HOME_BG_CACHE_KEY = 'mdga.homeBackgroundUrl';
+  const [homeBackgroundUrl, setHomeBackgroundUrl] = useState(() => {
+    try {
+      return localStorage.getItem(HOME_BG_CACHE_KEY) || DEFAULT_HOME_BACKGROUND_IMAGE;
+    } catch {
+      return DEFAULT_HOME_BACKGROUND_IMAGE;
+    }
+  });
   const [slide, setSlide] = useState(0);
 
   // Fetch carousel images (public endpoint, no auth needed)
@@ -33,7 +44,9 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           setCarouselImages(data.images || []);
-          setHomeBackgroundUrl(data.backgroundImageUrl || DEFAULT_HOME_BACKGROUND_IMAGE);
+          const nextUrl = data.backgroundImageUrl || DEFAULT_HOME_BACKGROUND_IMAGE;
+          setHomeBackgroundUrl(nextUrl);
+          try { localStorage.setItem(HOME_BG_CACHE_KEY, nextUrl); } catch { /* quota / private mode */ }
         }
       } catch { /* silent */ }
     })();
@@ -163,7 +176,14 @@ export default function Home() {
             <p className={styles.heroTagline}>"For the Horde. For Durotar. For Glory."</p>
             <p className={styles.heroSubtitle}>The #1 PvP Guild in North America &bull; Tichondrius-US</p>
             <div className={styles.heroCta}>
-              <Link to="/join" className="btn btn--primary btn--lg">Join the Fight</Link>
+              <a
+                href="https://guildsofwow.com/make-durotar-great-again"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--primary btn--lg"
+              >
+                Join the Fight
+              </a>
               <Link to="/story" className="btn btn--gold btn--lg">Our Story</Link>
             </div>
           </div>
@@ -235,7 +255,7 @@ export default function Home() {
                   Welcome back, {user?.displayName || user?.username}
                 </h2>
                 <div className={styles.dashWelcomeMeta}>
-                  <span className={`rank-badge rank-badge--${user?.rank}`}>{user?.rank}</span>
+                  <span className={`rank-badge rank-badge--${user?.rank}`}>{user?.displayRank || user?.rank}</span>
                   <span className={styles.dashWelcomeText}>Track events, forum posts, and guild updates in one place.</span>
                 </div>
               </div>
@@ -286,17 +306,29 @@ export default function Home() {
                   <div className={styles.dashPanel}>
                     <h3 className={styles.dashPanelTitle}>Recent Forum Activity</h3>
                     <div>
-                      {(dashboard.recentPosts || []).length > 0
-                        ? dashboard.recentPosts.map((p) => (
-                            <Link key={p.id} to={`/forum/post/${p.id}`} className={styles.dashActivityItem}>
-                              <span className={styles.dashActivityTitle}>{p.title}</span>
-                              <span className={styles.dashActivityMeta}>
-                                {p.category_name} &bull; {p.comment_count} replies &bull; {timeAgo(p.created_at)}
-                              </span>
-                            </Link>
-                          ))
-                        : <p className={styles.dashEmpty}>No recent posts.</p>
-                      }
+                      {(() => {
+                        // Hide posts in age-restricted categories unless the
+                        // viewer has acknowledged that category's 18+ gate.
+                        // The ack set is the same key AgeGate writes to.
+                        let acked = new Set();
+                        try {
+                          acked = new Set(JSON.parse(localStorage.getItem('mdga.ageAck.v1') || '[]'));
+                        } catch { /* ignore */ }
+                        const filtered = (dashboard.recentPosts || []).filter((p) => {
+                          if (!p.category_age_restricted) return true;
+                          return acked.has(String(p.category_id));
+                        }).slice(0, 6);
+                        return filtered.length > 0
+                          ? filtered.map((p) => (
+                              <Link key={p.id} to={`/forum/post/${p.id}`} className={styles.dashActivityItem}>
+                                <span className={styles.dashActivityTitle}>{p.title}</span>
+                                <span className={styles.dashActivityMeta}>
+                                  {p.category_name} &bull; {p.comment_count} replies &bull; {timeAgo(p.created_at)}
+                                </span>
+                              </Link>
+                            ))
+                          : <p className={styles.dashEmpty}>No recent posts.</p>;
+                      })()}
                     </div>
                     <Link to="/forum" className={styles.dashPanelLink}>View Forum &rarr;</Link>
                   </div>
@@ -415,7 +447,7 @@ export default function Home() {
                     />
                     <div>
                       <span className={styles.updateName}>{post.display_name || post.username}</span>
-                      <span className={`rank-badge rank-badge--${post.user_rank}`}>{post.user_rank}</span>
+                      <span className={`rank-badge rank-badge--${post.user_rank}`}>{post.user_display_rank || post.user_rank}</span>
                     </div>
                     <span className={styles.updateTime}>{timeAgo(post.created_at)}</span>
                   </div>
@@ -564,7 +596,14 @@ export default function Home() {
           <div className="container text-center">
             <h2>Ready to Defend Durotar?</h2>
             <p>Join hundreds of Horde warriors. Discord required. Glory guaranteed.</p>
-            <Link to="/join" className="btn btn--primary btn--lg">Enlist Now</Link>
+            <a
+              href="https://guildsofwow.com/make-durotar-great-again"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn--primary btn--lg"
+            >
+              Enlist Now
+            </a>
           </div>
         </section>
       )}

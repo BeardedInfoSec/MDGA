@@ -1,88 +1,523 @@
-.intro {
-  font-size: var(--font-size-xl);
-  line-height: var(--line-height-loose);
-  text-align: center;
-  color: var(--color-parchment);
-  font-style: italic;
-  max-width: 700px;
+/* ──────────────────────────────────────────────────────────────────────
+ * Story page — compact docs-style layout.
+ *
+ *   Compact title band  →  Two-column body
+ *   Body left col: sticky chapter sidebar (TOC w/ active state)
+ *   Body right col: chapter spreads (image + text)
+ *
+ * Drastically scaled down from the cinematic rework. The hero used to
+ * dominate the viewport (60vh image background); now it's a tight
+ * ~200px title band. Sidebar makes the page navigable instead of a
+ * scroll-fest.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.page {
+  /* transparent so site-wide bg image shows through */ background: transparent;
+  color: var(--color-text-primary);
+}
+
+/* ── Compact title band ── */
+.titleBand {
+  background: var(--color-black-soft);
+  border-bottom: 1px solid var(--color-gold-dark);
+  padding: var(--space-8) var(--space-6) var(--space-6) var(--space-6);
+}
+
+.titleBandInner {
+  max-width: 1400px;
   margin: 0 auto;
+  text-align: center;
 }
 
-/* Timeline */
-.timeline {
-  position: relative;
-  padding-left: var(--space-8);
-}
-
-.timeline::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--color-gray-700);
-}
-
-.item {
-  position: relative;
-  margin-bottom: var(--space-12);
-}
-
-.node {
-  position: absolute;
-  left: calc(-1 * var(--space-8) - 6px);
-  top: 0;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--color-red);
-  border: 2px solid var(--color-gray-900);
-}
-
-.date {
+.eyebrow {
+  display: inline-block;
   font-family: var(--font-ui);
-  font-size: var(--font-size-xs);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 5px;
+  color: var(--color-gold);
+  margin-bottom: var(--space-2);
+  padding: 3px 10px;
+  border: 1px solid var(--color-gold-dark);
+}
+
+.pageTitle {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1;
+  letter-spacing: 1px;
+  text-shadow: 0 0 24px rgba(212, 175, 55, 0.25);
+}
+
+.pageSubtitle {
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  color: var(--color-parchment);
+  margin: var(--space-3) auto 0 auto;
+  max-width: 640px;
+  font-style: italic;
+}
+
+/* Stats inline within the title band — saves a whole section. */
+.statsInline {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin-top: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.statsItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-5);
+  border-right: 1px solid var(--color-gray-800);
+}
+
+.statsItem:last-child { border-right: none; }
+
+.statsValue {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  color: var(--color-gold);
+  line-height: 1;
+}
+
+.statsLabel {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: var(--color-red-light);
-  display: block;
-  margin-bottom: var(--space-2);
-}
-
-.title {
-  font-size: var(--font-size-2xl);
-  margin-bottom: var(--space-3);
-  color: var(--color-gold);
-}
-
-.text {
   color: var(--color-text-secondary);
-  line-height: var(--line-height-loose);
-  font-size: var(--font-size-base);
 }
 
-.image {
-  margin-top: var(--space-4);
-  border-radius: var(--border-radius-md);
+/* ── Two-column layout: sidebar + content ── */
+.layout {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-6);
+}
+
+/* ── Sidebar (sticky chapter TOC) ── */
+.sidebar {
+  position: relative;
+}
+
+.sidebarSticky {
+  position: sticky;
+  top: calc(var(--nav-height, 70px) + var(--space-4));
+}
+
+.sidebarLabel {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-gray-800);
+}
+
+.sidebarNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.sidebarItem:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebarItemActive {
+  color: var(--color-gold);
+  border-left-color: var(--color-gold);
+  background: rgba(212, 175, 55, 0.05);
+}
+
+.sidebarItemNum {
+  font-family: var(--font-display);
+  font-size: var(--font-size-sm);
+  color: var(--color-gold-dark);
+  flex-shrink: 0;
+  width: 18px;
+  text-align: right;
+}
+
+.sidebarItemActive .sidebarItemNum { color: var(--color-gold); }
+
+.sidebarItemTitle {
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
   overflow: hidden;
-  border: 2px solid var(--color-gray-700);
-  box-shadow: var(--shadow-card);
+  text-overflow: ellipsis;
 }
 
-.image img {
+/* ── Content column ── */
+.content {
+  min-width: 0;
+}
+
+/* ── Chapter spread ── */
+/* Image gets ~38% so text is the dominant element. Keeps the alternating
+   visual rhythm without the image taking over each viewport. */
+.chapter {
+  display: grid;
+  grid-template-columns: 38% 62%;
+  gap: var(--space-5);
+  align-items: start;
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--color-gray-800);
+  scroll-margin-top: calc(var(--nav-height, 70px) + var(--space-3));
+}
+
+.chapter:last-of-type {
+  border-bottom: none;
+}
+
+.chapter.chapterImageRight .chapterMedia { order: 2; }
+
+/* Image + caption-style pull quote stack */
+.chapterMedia {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.chapterImageWrap {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-800);
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+  padding: 0;
+  cursor: zoom-in;
+  display: block;
+  width: 100%;
+}
+
+.chapterImageWrap:hover { border-color: var(--color-gold-dark); }
+.chapterImageWrap:hover .chapterImageZoom { opacity: 1; }
+.chapterImageWrap:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* Zoom indicator on hover so users know the image is interactive. */
+.chapterImageZoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-gold);
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.chapterImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.chapter:hover .chapterImage { transform: scale(1.02); }
+
+.chapterText {
+  display: flex;
+  flex-direction: column;
+}
+
+.chapterHeader {
+  margin-bottom: var(--space-3);
+}
+
+.chapterPart {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--color-gold-dark);
+  margin-bottom: 4px;
+}
+
+.chapterTitle {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 1.85rem);
+  color: var(--color-gold);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.paragraph {
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  line-height: 1.65;
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.paragraph:last-child { margin-bottom: 0; }
+
+.dropCap {
+  float: left;
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  line-height: 0.85;
+  color: var(--color-gold);
+  padding: 0.05em 0.1em 0 0;
+  text-shadow: 0 1px 8px rgba(212, 175, 55, 0.35);
+}
+
+/* ── Pull quote ── */
+/* Caption-style: sits directly under its associated image. */
+.pullQuote {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: var(--font-size-base);
+  line-height: 1.35;
+  color: var(--color-parchment-light);
+  font-style: italic;
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-6);
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.06), rgba(212, 175, 55, 0.02));
+  border-left: 2px solid var(--color-gold);
+  border-radius: var(--border-radius-sm);
+}
+
+.pullQuote p { margin: 0; }
+
+.pullQuoteMark {
+  position: absolute;
+  top: -0.25em;
+  left: var(--space-2);
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  line-height: 1;
+  color: var(--color-gold);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Ending section ── */
+.ending {
+  padding: var(--space-8) 0 var(--space-4) 0;
+  scroll-margin-top: calc(var(--nav-height, 70px) + var(--space-3));
+}
+
+.endingFigure {
+  position: relative;
+  display: block;
+  margin: 0 auto var(--space-5) auto;
+  max-width: 560px;
+  width: 100%;
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--color-gold-dark);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.endingFigure:hover .chapterImageZoom { opacity: 1; }
+.endingFigure:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+.endingFigure img {
   width: 100%;
   height: auto;
   display: block;
 }
 
-.closing {
-  font-size: var(--font-size-xl);
-  color: var(--color-parchment);
+/* ── Lightbox ── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  cursor: zoom-out;
+  animation: storyLightboxFade 200ms ease-out;
 }
 
-@media (max-width: 768px) {
-  .title {
-    font-size: var(--font-size-xl);
+@keyframes storyLightboxFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.lightboxImage {
+  max-width: min(96vw, 1600px);
+  max-height: 90vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  cursor: default;
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.8), 0 0 60px rgba(212, 175, 55, 0.15);
+}
+
+.lightboxClose {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-gold);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.lightboxClose:hover {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: var(--color-gold);
+}
+
+.signature {
+  text-align: center;
+  margin: 0 auto var(--space-6) auto;
+  max-width: 520px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-gold-dark);
+  font-family: var(--font-body);
+}
+
+.signature p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+.signatureName {
+  font-family: var(--font-display) !important;
+  font-size: var(--font-size-xl) !important;
+  color: var(--color-gold) !important;
+  font-style: normal !important;
+  margin-top: 4px !important;
+  text-shadow: 0 0 16px rgba(212, 175, 55, 0.25);
+}
+
+.signatureTitle {
+  font-family: var(--font-ui) !important;
+  font-size: var(--font-size-xs) !important;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--color-gold-dark) !important;
+  margin-top: 2px !important;
+}
+
+/* ── CTA inside ending ── */
+.cta {
+  text-align: center;
+  padding: var(--space-5) var(--space-3);
+  border-top: 1px solid var(--color-gray-800);
+}
+
+.ctaTitle {
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  color: var(--color-gold);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.ctaSub {
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  color: var(--color-parchment);
+  max-width: 480px;
+  margin: 0 auto var(--space-3) auto;
+  line-height: 1.55;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+  .sidebar {
+    display: none; /* hide TOC on mobile — anchor links still work via direct URL */
+  }
+  .chapter {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+  .chapter.chapterImageRight .chapterImageWrap { order: 0; }
+  .chapterImageWrap {
+    aspect-ratio: 16 / 9;
+  }
+}
+
+@media (max-width: 640px) {
+  .titleBand {
+    padding: var(--space-6) var(--space-3) var(--space-4) var(--space-3);
+  }
+  .statsInline {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .statsItem {
+    flex: 1 1 40%;
+    border-right: none;
+    padding: var(--space-2);
+    border: 1px solid var(--color-gray-800);
+    border-radius: var(--border-radius-sm);
   }
 }
