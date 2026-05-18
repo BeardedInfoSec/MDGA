@@ -6,6 +6,7 @@ import { timeAgo } from '../../utils/helpers';
 import { authorDisplayName, authorProfileLink, isFormerMember } from '../../utils/forumAuthor';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
+import { postUrl } from '../../utils/forumUrls';
 
 const FALLBACK_ICONS = {
   'General Discussion': '\u{1F4AC}',
@@ -154,7 +155,7 @@ export default function ForumIndex() {
               {suggestions && suggestions.length > 0 && (
                 <div className={styles.forumSuggest}>
                   {suggestions.map(r => (
-                    <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.forumSuggestItem}>
+                    <Link key={r.id} to={postUrl(r)} className={styles.forumSuggestItem}>
                       <span className={styles.forumSuggestTitle}>{cleanForumTitle(r.title)}</span>
                       <span className={styles.forumSuggestMeta}>{r.category_name} &middot; {SUGGEST_LABELS[r.match_type] || r.match_type}</span>
                     </Link>
@@ -194,7 +195,7 @@ export default function ForumIndex() {
                     const netVotes = r.net_votes || 0;
                     const voteCls = netVotes > 0 ? styles.forumPostStatPositive : netVotes < 0 ? styles.forumPostStatNegative : '';
                     return (
-                      <Link key={r.id} to={`/forum/post/${r.id}`} className={styles.forumPostRow}>
+                      <Link key={r.id} to={postUrl(r)} className={styles.forumPostRow}>
                         <div className={styles.forumPostTitle}>
                           {cleanForumTitle(r.title)}
                           <span className={styles.forumPostTagMatch}>{MATCH_LABELS[r.match_type] || r.match_type}</span>
@@ -247,7 +248,7 @@ export default function ForumIndex() {
                   {categories.map((cat) => (
                     <Link
                       key={cat.id}
-                      to={`/forum/category/${cat.id}`}
+                      to={`/forum/category/${cat.slug || cat.id}`}
                       className={styles.forumPostRow}
                       style={cat.accent_color ? { borderLeft: `3px solid ${cat.accent_color}` } : undefined}
                     >
@@ -258,6 +259,12 @@ export default function ForumIndex() {
                         <span>{cat.name}</span>
                         {cat.officer_only ? (
                           <span className={styles.forumPostTagPinned}>Officer-only</span>
+                        ) : null}
+                        {cat.officer_post_only ? (
+                          <span className={styles.forumPostTagPinned} title="Only officers can start threads here; replies are open to everyone.">Officers post</span>
+                        ) : null}
+                        {cat.age_restricted ? (
+                          <span className={styles.forumTagSensitive} title="Age-restricted: viewers see an 18+ confirmation modal">18+</span>
                         ) : null}
                       </div>
                       <div className={styles.forumPostMeta}>

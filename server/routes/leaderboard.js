@@ -34,7 +34,11 @@ router.get('/', optionalAuth, async (req, res) => {
     // is applied AFTER ranking so search results show each character's
     // *true* leaderboard rank, not their position in the filtered subset.
     const q = String(req.query.q || '').trim().slice(0, 60);
-    const baseFilter = `g.is_primary = TRUE AND gms.${bracket} > 0`;
+    // Previously hard-coded to is_primary=TRUE (Tichondrius MDGA only).
+    // Now the leaderboard spans every federation guild — Area-52, Illidan,
+    // Sargeras, Moon-Guard MEGA, etc. — so members on any registered realm
+    // appear. Filter still drops zero-rated rows for the active bracket.
+    const baseFilter = `gms.${bracket} > 0`;
     const baseWhere = `WHERE ${baseFilter}`;
 
     // Build the search clause in two forms: qualified (gm./u. prefixes) for
@@ -78,7 +82,14 @@ router.get('/', optionalAuth, async (req, res) => {
     // outer ORDER BY references the alias when sorting by value on that bracket.
     const bracketColumn = bracket === 'item_level' ? 'ps_item_level' : bracket;
     const sortBy = String(req.query.sort_by || 'rank');
-    const sortDir = String(req.query.sort_dir || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    // Per-column default direction: rank/name columns want ASC (so #1 / "A"
+    // shows first); numeric value columns want DESC (highest first). Only
+    // override when the client explicitly passes sort_dir.
+    const rawSortDir = String(req.query.sort_dir || '').toLowerCase();
+    const ascByDefault = ['rank', 'character', 'player', 'class'].includes(sortBy);
+    const sortDir = rawSortDir === 'asc' ? 'ASC'
+                    : rawSortDir === 'desc' ? 'DESC'
+                    : (ascByDefault ? 'ASC' : 'DESC');
     const winRateExpr = bracket === 'arenas_won'
       ? '(CASE WHEN arenas_played > 0 THEN arenas_won * 1.0 / arenas_played ELSE 0 END)'
       : (bracket === 'bgs_won'

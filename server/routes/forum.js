@@ -30,6 +30,16 @@ async function getOptionalActiveUser(req) {
   }
 }
 
+// Post URL params may be either pure numeric ("23") or the friendly form
+// "23-some-title-slug". Always parse the leading digits as the post id;
+// anything after the first hyphen is cosmetic.
+function parsePostId(raw) {
+  const m = String(raw || '').match(/^(\d+)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 function hasOfficerCategoryAccess(user) {
   if (!user) return false;
   if (['officer', 'guildmaster'].includes(user.rank)) return true;
@@ -49,10 +59,11 @@ router.get('/categories', async (req, res) => {
     const [categories] = await pool.execute(`
       SELECT
         fc.id, fc.name, fc.description, fc.sort_order, fc.created_by, fc.created_at,
-        fc.officer_only, fc.age_restricted, fc.icon, fc.accent_color, fc.banner_url,
-        (SELECT COUNT(*) FROM forum_posts fp WHERE fp.category_id = fc.id) AS post_count,
-        (SELECT fp2.title FROM forum_posts fp2 WHERE fp2.category_id = fc.id ORDER BY fp2.created_at DESC LIMIT 1) AS latest_post_title,
-        (SELECT fp3.created_at FROM forum_posts fp3 WHERE fp3.category_id = fc.id ORDER BY fp3.created_at DESC LIMIT 1) AS latest_post_date
+        fc.officer_only, fc.age_restricted, fc.officer_post_only, fc.icon, fc.accent_color, fc.banner_url,
+        LOWER(REGEXP_REPLACE(REGEXP_REPLACE(fc.name, '[^A-Za-z0-9 -]', ''), ' +', '-')) AS slug,
+        (SELECT COUNT(*) FROM forum_posts fp WHERE fp.category_id = fc.id AND fp.deleted_at IS NULL) AS post_count,
+        (SELECT fp2.title FROM forum_posts fp2 WHERE fp2.category_id = fc.id AND fp2.deleted_at IS NULL ORDER BY fp2.created_at DESC LIMIT 1) AS latest_post_title,
+        (SELECT fp3.created_at FROM forum_posts fp3 WHERE fp3.category_id = fc.id AND fp3.deleted_at IS NULL ORDER BY fp3.created_at DESC LIMIT 1) AS latest_post_date
       FROM forum_categories fc
       ${whereClause}
       ORDER BY fc.sort_order ASC
@@ -90,7 +101,7 @@ router.get('/search', async (req, res) => {
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
         fc_cat.name AS category_name,
-        (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id) AS comment_count,
+        (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         CASE
           WHEN u.username LIKE ? OR u.display_name LIKE ? THEN 'user'
@@ -132,6 +143,7 @@ function normalizeCategoryPayload(body) {
   const sortOrder = Number.isFinite(Number(body.sort_order ?? body.sortOrder)) ? parseInt(body.sort_order ?? body.sortOrder, 10) : 0;
   const officerOnly = body.officer_only === true || body.officer_only === 1 || body.officer_only === '1' ? 1 : 0;
   const ageRestricted = body.age_restricted === true || body.age_restricted === 1 || body.age_restricted === '1' ? 1 : 0;
+  const officerPostOnly = body.officer_post_only === true || body.officer_post_only === 1 || body.officer_post_only === '1' ? 1 : 0;
 
   if (!name) errors.push('Category name is required');
   if (name.length > 100) errors.push('Category name must be 100 characters or fewer');
@@ -140,7 +152,7 @@ function normalizeCategoryPayload(body) {
 
   return {
     errors,
-    payload: { name, description, icon, accent_color: accent || null, banner_url: banner, sort_order: sortOrder, officer_only: officerOnly, age_restricted: ageRestricted },
+    payload: { name, description, icon, accent_color: accent || null, banner_url: banner, sort_order: sortOrder, officer_only: officerOnly, age_restricted: ageRestricted, officer_post_only: officerPostOnly },
   };
 }
 
@@ -155,10 +167,10 @@ router.post('/categories', requireAuth, requirePermission('forum.manage_categori
 
     const [result] = await pool.execute(
       `INSERT INTO forum_categories
-         (name, description, sort_order, created_by, officer_only, age_restricted, icon, accent_color, banner_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (name, description, sort_order, created_by, officer_only, age_restricted, officer_post_only, icon, accent_color, banner_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [payload.name, payload.description, payload.sort_order, req.user.id, payload.officer_only,
-       payload.age_restricted, payload.icon, payload.accent_color, payload.banner_url]
+       payload.age_restricted, payload.officer_post_only, payload.icon, payload.accent_color, payload.banner_url]
     );
     res.status(201).json({ id: result.insertId, message: 'Category created' });
   } catch (err) {
@@ -186,11 +198,11 @@ router.put('/categories/:id', requireAuth, requirePermission('forum.manage_categ
 
     const [result] = await pool.execute(
       `UPDATE forum_categories
-         SET name = ?, description = ?, sort_order = ?, officer_only = ?, age_restricted = ?,
+         SET name = ?, description = ?, sort_order = ?, officer_only = ?, age_restricted = ?, officer_post_only = ?,
              icon = ?, accent_color = ?, banner_url = ?
        WHERE id = ?`,
       [payload.name, payload.description, payload.sort_order, payload.officer_only, payload.age_restricted,
-       payload.icon, payload.accent_color, payload.banner_url, id]
+       payload.officer_post_only, payload.icon, payload.accent_color, payload.banner_url, id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Category not found' });
     res.json({ message: 'Category updated' });
@@ -227,9 +239,16 @@ router.get('/categories/:id/posts', async (req, res) => {
     const sort = req.query.sort || 'hot'; // hot, new, top
     const viewer = await getOptionalActiveUser(req);
 
+    // Accept either a numeric id or a name-derived slug. Slug normalization
+    // mirrors the SELECT in /categories above so the URL the frontend emits
+    // matches what the lookup expects.
+    const param = String(req.params.id || '');
+    const isNumeric = /^\d+$/.test(param);
     const [catRows] = await pool.execute(
-      'SELECT * FROM forum_categories WHERE id = ?',
-      [req.params.id]
+      isNumeric
+        ? 'SELECT * FROM forum_categories WHERE id = ?'
+        : "SELECT * FROM forum_categories WHERE LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^A-Za-z0-9 -]', ''), ' +', '-')) = ? LIMIT 1",
+      [isNumeric ? parseInt(param, 10) : param.toLowerCase()]
     );
     if (catRows.length === 0) {
       return res.status(404).json({ error: 'Category not found' });
@@ -237,6 +256,7 @@ router.get('/categories/:id/posts', async (req, res) => {
     if (catRows[0].officer_only && !hasOfficerCategoryAccess(viewer)) {
       return res.status(403).json({ error: 'You do not have access to this category' });
     }
+    const resolvedCategoryId = catRows[0].id;
 
     let orderClause;
     if (sort === 'new') {
@@ -253,7 +273,7 @@ router.get('/categories/:id/posts', async (req, res) => {
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
         uc_main.realm_slug AS main_realm_slug,
-        (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id) AS comment_count,
+        (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         COALESCE(vote_sum.upvotes, 0) AS upvotes,
         COALESCE(vote_sum.downvotes, 0) AS downvotes
@@ -270,11 +290,11 @@ router.get('/categories/:id/posts', async (req, res) => {
       WHERE fp.category_id = ? AND fp.deleted_at IS NULL
       ORDER BY ${orderClause}
       LIMIT ${limit} OFFSET ${offset}
-    `, [req.params.id]);
+    `, [resolvedCategoryId]);
 
     const [countResult] = await pool.execute(
       'SELECT COUNT(*) AS total FROM forum_posts WHERE category_id = ? AND deleted_at IS NULL',
-      [req.params.id]
+      [resolvedCategoryId]
     );
 
     res.json({
@@ -303,12 +323,21 @@ router.post('/posts', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Title must be 200 characters or less' });
     }
 
-    // Check if category is officer-only
-    const [catRows] = await pool.execute('SELECT officer_only FROM forum_categories WHERE id = ?', [categoryId]);
-    if (catRows.length > 0 && catRows[0].officer_only) {
+    // Check category-level posting restrictions:
+    //   officer_only        — fully gated; non-officers can't even see it
+    //   officer_post_only   — public read/reply, only officers may start threads
+    const [catRows] = await pool.execute(
+      'SELECT officer_only, officer_post_only FROM forum_categories WHERE id = ?',
+      [categoryId]
+    );
+    if (catRows.length > 0) {
+      const cat = catRows[0];
       const canAccess = hasOfficerCategoryAccess(req.user);
-      if (!canAccess) {
+      if (cat.officer_only && !canAccess) {
         return res.status(403).json({ error: 'You do not have permission to post in this category' });
+      }
+      if (cat.officer_post_only && !canAccess) {
+        return res.status(403).json({ error: 'Only officers can start new threads in this category — you can still reply to existing posts.' });
       }
     }
 
@@ -324,11 +353,19 @@ router.post('/posts', requireAuth, async (req, res) => {
 });
 
 // GET /api/forum/posts/:id
+// :id param can be either pure numeric ("11") or the friendly form
+// "11-some-post-title". We always parse the leading digits as the
+// authoritative post id and ignore anything after the first hyphen.
 router.get('/posts/:id', async (req, res) => {
   try {
     const viewer = await getOptionalActiveUser(req);
     const viewerUserId = viewer ? viewer.id : null;
     let userVote = 0;
+    const postIdMatch = String(req.params.id || '').match(/^(\d+)/);
+    const postId = postIdMatch ? parseInt(postIdMatch[1], 10) : NaN;
+    if (!Number.isInteger(postId) || postId <= 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
 
     const [postRows] = await pool.execute(`
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
@@ -352,7 +389,7 @@ router.get('/posts/:id', async (req, res) => {
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
       WHERE fp.id = ? AND fp.deleted_at IS NULL
-    `, [req.params.id]);
+    `, [postId]);
 
     if (postRows.length === 0) {
       return res.status(404).json({ error: 'Post not found' });
@@ -365,10 +402,10 @@ router.get('/posts/:id', async (req, res) => {
     if (viewerUserId) {
       const [viewResult] = await pool.execute(
         'INSERT IGNORE INTO forum_post_views (post_id, user_id) VALUES (?, ?)',
-        [req.params.id, viewerUserId]
+        [postId, viewerUserId]
       );
       if (viewResult.affectedRows > 0) {
-        await pool.execute('UPDATE forum_posts SET view_count = view_count + 1 WHERE id = ?', [req.params.id]);
+        await pool.execute('UPDATE forum_posts SET view_count = view_count + 1 WHERE id = ?', [postId]);
       }
     }
 
@@ -376,7 +413,7 @@ router.get('/posts/:id', async (req, res) => {
     if (viewerUserId) {
       const [voteRows] = await pool.execute(
         'SELECT vote FROM forum_votes WHERE post_id = ? AND user_id = ?',
-        [req.params.id, viewerUserId]
+        [postId, viewerUserId]
       );
       if (voteRows.length > 0) userVote = voteRows[0].vote;
     }
@@ -406,7 +443,7 @@ router.get('/posts/:id', async (req, res) => {
         AND comment_user_vote.user_id = ?
       WHERE fc.post_id = ? AND fc.deleted_at IS NULL
       ORDER BY fc.created_at ASC
-    `, [viewerUserId || 0, req.params.id]);
+    `, [viewerUserId || 0, postId]);
 
     const post = { ...postRows[0] };
     delete post.officer_only;
@@ -420,12 +457,14 @@ router.get('/posts/:id', async (req, res) => {
 // POST /api/forum/posts/:id/comments
 router.post('/posts/:id/comments', requireAuth, async (req, res) => {
   try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
     const [postRows] = await pool.execute(`
       SELECT fp.locked, fc.officer_only
       FROM forum_posts fp
       JOIN forum_categories fc ON fc.id = fp.category_id
       WHERE fp.id = ?
-    `, [req.params.id]);
+    `, [postId]);
     if (postRows.length === 0) return res.status(404).json({ error: 'Post not found' });
     if (postRows[0].officer_only && !hasOfficerCategoryAccess(req.user)) {
       return res.status(403).json({ error: 'You do not have access to this post' });
@@ -437,7 +476,7 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
 
     const [result] = await pool.execute(
       'INSERT INTO forum_comments (post_id, user_id, content, image_url) VALUES (?, ?, ?, ?)',
-      [req.params.id, req.user.id, content, imageUrl || null]
+      [postId, req.user.id, content, imageUrl || null]
     );
     res.status(201).json({ id: result.insertId, message: 'Comment added' });
   } catch (err) {
@@ -449,12 +488,13 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
 // POST /api/forum/posts/:id/vote
 router.post('/posts/:id/vote', requireAuth, async (req, res) => {
   try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
     const { vote } = req.body;
     if (vote !== 1 && vote !== -1 && vote !== 0) {
       return res.status(400).json({ error: 'Vote must be 1, -1, or 0' });
     }
 
-    const postId = req.params.id;
     const userId = req.user.id;
     const [postRows] = await pool.execute(`
       SELECT fp.id, fc.officer_only
@@ -560,7 +600,8 @@ router.post('/comments/:id/vote', requireAuth, async (req, res) => {
 // POST /api/forum/posts/:id/report
 router.post('/posts/:id/report', requireAuth, async (req, res) => {
   try {
-    const postId = Number(req.params.id);
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
     if (!Number.isFinite(postId)) {
       return res.status(400).json({ error: 'Invalid post id' });
     }
@@ -689,9 +730,11 @@ router.post('/comments/:id/report', requireAuth, async (req, res) => {
 // already filter on deleted_at IS NULL via the WHERE clauses above.
 router.delete('/posts/:id', requireAuth, async (req, res) => {
   try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
     const [postRows] = await pool.execute(
       'SELECT user_id FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
-      [req.params.id]
+      [postId]
     );
     if (postRows.length === 0) return res.status(404).json({ error: 'Post not found' });
     const isOwner = postRows[0].user_id === req.user.id;
@@ -701,13 +744,13 @@ router.delete('/posts/:id', requireAuth, async (req, res) => {
 
     await pool.execute(
       'UPDATE forum_posts SET deleted_at = NOW(), deleted_by = ? WHERE id = ?',
-      [req.user.id, req.params.id]
+      [req.user.id, postId]
     );
     if (!isOwner || canDeleteAny) {
       logAdminAction({
         adminUserId: req.user.id, actionType: 'post.delete',
-        targetType: 'forum_post', targetId: parseInt(req.params.id, 10),
-        summary: `Soft-deleted post #${req.params.id}`,
+        targetType: 'forum_post', targetId: parseInt(postId, 10),
+        summary: `Soft-deleted post #${postId}`,
       });
     }
     res.json({ message: 'Post deleted' });
@@ -754,7 +797,9 @@ router.delete('/comments/:id', requireAuth, async (req, res) => {
 // can review the history and audit moderation rewrites.
 router.put('/posts/:id', requireAuth, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    const id = parseInt(postId, 10);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid post id' });
 
     const [[existing]] = await pool.execute(
@@ -768,9 +813,13 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
       (req.user.permissions && req.user.permissions.includes('forum.delete_any_post'));
     if (!isOwner && !canEditAny) return res.status(403).json({ error: 'Not authorized' });
 
-    const CTRL = new RegExp('[\u0000-\u001F\u007F]', 'g');
-    const cleanTitle = String(req.body.title ?? existing.title).replace(CTRL, '').trim();
-    const cleanContent = String(req.body.content ?? existing.content).replace(CTRL, '').trim();
+    // Title: strip ALL control chars (single-line, no newlines allowed).
+    // Content: strip control chars EXCEPT tab/newline/carriage-return so
+    // paragraph breaks survive the round-trip.
+    const TITLE_CTRL_RE = new RegExp('[\u0000-\u001F\u007F]', 'g');
+    const CONTENT_CTRL_RE = new RegExp('[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]', 'g');
+    const cleanTitle = String(req.body.title ?? existing.title).replace(TITLE_CTRL_RE, '').trim();
+    const cleanContent = String(req.body.content ?? existing.content).replace(CONTENT_CTRL_RE, '').trim();
     if (!cleanTitle || !cleanContent) {
       return res.status(400).json({ error: 'Title and content are required' });
     }

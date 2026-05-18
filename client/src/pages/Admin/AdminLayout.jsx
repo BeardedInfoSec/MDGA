@@ -18,7 +18,10 @@ const NAV_GROUPS = [
   {
     id: 'overview',
     icon: LayoutDashboard,
-    items: [{ id: 'overview', label: 'Overview' }],
+    items: [
+      { id: 'overview', label: 'Overview' },
+      { id: 'stats', label: 'Statistics' },
+    ],
   },
   {
     id: 'people',

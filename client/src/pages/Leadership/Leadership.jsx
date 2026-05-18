@@ -63,6 +63,26 @@ const LEADERS = [
       'Council enforcer — known for an eccentric approach to guild culture and morale',
     ],
   },
+  {
+    id: 'polychange',
+    name: 'Polychange',
+    rank: 'The Architect',
+    classKey: 'druid',
+    classLabel: 'Resto / Guardian Druid',
+    image: '/images/polychange.png',
+    imageAlt: 'Polychange — The Architect of MDGA',
+    paragraphs: [
+      "Polychange is the Architect — the Tauren druid who built the digital ground every MDGA member walks on. Twenty years deep in Azeroth, north of 400,000 confirmed kills logged across the account, and a lifelong instinct for taking things apart and reassembling them better. The website, the forum, the roster pipeline, the tooling that keeps the warband coordinated across server shards — all of it was forged by him.",
+      "He joined MDGA in July of 2025 and immediately set about wiring the guild for scale. Cawkadoodle holds the line. Druzak coordinates the flanks. Nemy keeps the machinery moving. Polychange makes sure the warband has a memory — and a place to live when the fighting's done.",
+    ],
+    achievements: [
+      'Architect of mdga.gg — built the site, forum, and roster system from scratch',
+      '20+ years in World of Warcraft',
+      '400,000+ confirmed kills account-wide',
+      'Joined MDGA — July 2025',
+      'Cawkadoodle strokes his noodle',
+    ],
+  },
 ];
 
 const RANKS = [

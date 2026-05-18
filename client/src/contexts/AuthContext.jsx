@@ -30,14 +30,21 @@ export function AuthProvider({ children }) {
   }, [user, hasPermission]);
 
   const isGuildMaster = useCallback(() => {
-    return user && user.rank === 'guildmaster';
-  }, [user]);
+    if (!user) return false;
+    if (user.rank === 'guildmaster') return true;
+    // Treat any user with admin.manage_roles as a peer of guildmaster for
+    // UI gating (matches the relaxed server-side requireGuildMaster).
+    return hasPermission('admin.manage_roles');
+  }, [user, hasPermission]);
 
   const login = useCallback((newToken, newUser) => {
     localStorage.setItem(AUTH_TOKEN_KEY, newToken);
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
+    // Reset the first-time onboarding "dismissed" flag so the nudge can fire
+    // again for users who linked no character and have come back fresh.
+    try { sessionStorage.removeItem('mdga.charOnboardDismissed'); } catch { /* private mode */ }
   }, []);
 
   const logout = useCallback(() => {

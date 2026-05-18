@@ -194,10 +194,12 @@ export default function Leaderboards() {
 
   const fmt = (v) => (v || 0).toLocaleString();
 
-  // Title band stats — derived from the current view + bracket totals
+  // Title band stats — derived from the current view + bracket totals.
+  // "Top X" always pulls the actual bracket leader (leaderboard_rank === 1),
+  // not the first row of whatever sort the user has applied.
   const stats = useMemo(() => {
-    const topEntry = entries[0];
-    const topRaw = topEntry ? (topEntry[bracket] || 0) : 0;
+    const leader = entries.find((e) => e.leaderboard_rank === 1) || null;
+    const topRaw = leader ? (leader[bracket] || 0) : 0;
     const topDisplay = topRaw
       ? (FORMAT_NUMBER.has(bracket) ? topRaw.toLocaleString() : String(topRaw))
       : '—';

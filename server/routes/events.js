@@ -33,6 +33,7 @@ function normalizeEventPayload(payload) {
     timezone: (payload.timezone || '').trim(),
     category: (payload.category || '').trim().toLowerCase(),
     description: (payload.description || '').trim(),
+    prize: (payload.prize || '').trim().slice(0, 255),
   };
 }
 
@@ -53,13 +54,19 @@ router.get('/', async (req, res) => {
       SELECT e.id, e.title,
              DATE_FORMAT(e.starts_at, '%Y-%m-%d %H:%i:%s') AS starts_at,
              DATE_FORMAT(e.ends_at, '%Y-%m-%d %H:%i:%s') AS ends_at,
-             e.timezone, e.category, e.description,
+             e.timezone, e.category, e.description, e.prize,
              DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
              e.series_id, e.series_index, e.series_total,
+             e.created_by AS created_by_id,
+             creator.display_name AS created_by_name,
+             creator.username AS created_by_username,
+             creator.display_rank AS created_by_display_rank,
+             creator.\`rank\` AS created_by_rank,
         (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'going') AS rsvp_going,
         (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'maybe') AS rsvp_maybe,
         (SELECT COUNT(*) FROM event_screenshots s WHERE s.event_id = e.id) AS screenshot_count
       FROM events e
+      LEFT JOIN users creator ON creator.id = e.created_by
       WHERE e.starts_at IS NOT NULL
       ORDER BY e.starts_at ASC
     `);
@@ -145,7 +152,7 @@ router.get('/addon-export', async (req, res) => {
 // POST /api/events
 router.post('/', requireAuth, requirePermission('events.manage'), async (req, res) => {
   try {
-    const { title, startsAt, endsAt, timezone, category, description } = normalizeEventPayload(req.body || {});
+    const { title, startsAt, endsAt, timezone, category, description, prize } = normalizeEventPayload(req.body || {});
     if (!title || !startsAt || !timezone || !category) {
       return res.status(400).json({ error: 'Title, start date/time, timezone, and category are required' });
     }
@@ -171,6 +178,8 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
         return res.status(400).json({ error: 'End time must be after start time' });
       }
     }
+
+    const prizeValue = prize || null;
 
     // Compute duration offset (for recurring: shift end by same amount as start)
     const startDt = DateTime.fromISO(startsAt, { zone: timezone });
@@ -212,8 +221,8 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
             instanceEndUtc = instanceEnd.toUTC().toFormat('yyyy-MM-dd HH:mm:ss');
           }
           await conn.execute(
-            'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, created_by, series_id, series_index, series_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [title, instanceStartUtc, instanceEndUtc, timezone, category, description || '', req.user.id, seriesId, i + 1, numCount]
+            'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, prize, created_by, series_id, series_index, series_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [title, instanceStartUtc, instanceEndUtc, timezone, category, description || '', prizeValue, req.user.id, seriesId, i + 1, numCount]
           );
         }
         await conn.commit();
@@ -227,8 +236,8 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
     } else {
       // Single event (no recurrence)
       const [result] = await pool.execute(
-        'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [title, startsAtUtc, endsAtUtc, timezone, category, description || '', req.user.id]
+        'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, prize, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, startsAtUtc, endsAtUtc, timezone, category, description || '', prizeValue, req.user.id]
       );
       res.status(201).json({ id: result.insertId, message: 'Event created' });
     }
@@ -241,7 +250,7 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
 // PUT /api/events/:id
 router.put('/:id', requireAuth, requirePermission('events.manage'), async (req, res) => {
   try {
-    const { title, startsAt, endsAt, timezone, category, description } = normalizeEventPayload(req.body || {});
+    const { title, startsAt, endsAt, timezone, category, description, prize } = normalizeEventPayload(req.body || {});
     if (!title || !startsAt || !timezone || !category) {
       return res.status(400).json({ error: 'Title, start date/time, timezone, and category are required' });
     }
@@ -269,8 +278,8 @@ router.put('/:id', requireAuth, requirePermission('events.manage'), async (req, 
     }
 
     const [result] = await pool.execute(
-      'UPDATE events SET title = ?, starts_at = ?, ends_at = ?, timezone = ?, category = ?, description = ? WHERE id = ?',
-      [title, startsAtUtc, endsAtUtc, timezone, category, description || '', req.params.id]
+      'UPDATE events SET title = ?, starts_at = ?, ends_at = ?, timezone = ?, category = ?, description = ?, prize = ? WHERE id = ?',
+      [title, startsAtUtc, endsAtUtc, timezone, category, description || '', prize || null, req.params.id]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Event not found' });

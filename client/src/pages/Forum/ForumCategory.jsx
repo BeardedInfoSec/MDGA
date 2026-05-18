@@ -7,6 +7,7 @@ import { authorDisplayName, authorProfileLink, isFormerMember } from '../../util
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
+import { postUrl } from '../../utils/forumUrls';
 
 const FALLBACK_ICONS = {
   'General Discussion': '\u{1F4AC}',
@@ -90,7 +91,12 @@ export default function ForumCategory() {
     setSearchParams({ page: '1', sort });
   };
 
-  const canPost = isLoggedIn && category && (!category.officer_only || isOfficer());
+  // Posting (creating new threads) is gated by:
+  //   officer_only       — already blocks all access; only officers see this
+  //   officer_post_only  — anyone reads + replies, only officers create threads
+  const canPost = isLoggedIn && category &&
+    (!category.officer_only || isOfficer()) &&
+    (!category.officer_post_only || isOfficer());
   const sortOptions = [
     { key: 'hot', label: 'Hot' },
     { key: 'newest', label: 'New' },
@@ -120,7 +126,13 @@ export default function ForumCategory() {
       >
         <div className={styles.forumTitleBandInner}>
           <span className={styles.forumEyebrow}>
-            {category?.officer_only ? 'Officer-only category' : 'Forum category'}
+            {category?.officer_only
+              ? 'Officer-only category'
+              : category?.officer_post_only
+                ? 'Officers post • everyone replies'
+                : category?.age_restricted
+                  ? 'Age-restricted (18+) category'
+                  : 'Forum category'}
           </span>
           <div className={styles.forumCategoryTitleAccent}>
             {category && (
@@ -202,7 +214,7 @@ export default function ForumCategory() {
                   ? `${styles.forumPostRowPinned}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`
                   : `${styles.forumPostRow}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`;
                 return (
-                  <Link key={post.id} to={`/forum/post/${post.id}`} className={cls}>
+                  <Link key={post.id} to={postUrl(post)} className={cls}>
                     <div className={styles.forumPostTitle}>
                       {cleanForumTitle(post.title)}
                       {post.pinned ? <span className={styles.forumPostTagPinned}>Pinned</span> : null}

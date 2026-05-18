@@ -38,6 +38,50 @@ export default function ForumPost() {
   const commentImageRef = useRef(null);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisions, setRevisions] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const openEditPost = () => {
+    if (!post) return;
+    setEditTitle(post.title || '');
+    setEditContent(post.content || '');
+    setEditError('');
+    setEditOpen(true);
+  };
+
+  const submitEditPost = async () => {
+    if (!editTitle.trim() || !editContent.trim()) {
+      setEditError('Title and content are required.');
+      return;
+    }
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const res = await apiFetch(`/forum/posts/${post.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title: editTitle.trim(), content: editContent.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setEditError(data.error || 'Failed to save.');
+        return;
+      }
+      setEditOpen(false);
+      // Refetch the post so the visible content updates
+      const refresh = await apiFetch(`/forum/posts/${post.id}`);
+      if (refresh.ok) {
+        const data = await refresh.json();
+        if (data.post) setPost(data.post);
+      }
+    } catch {
+      setEditError('Failed to save.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const postTitle = cleanForumTitle(post?.title || '');
   useDocumentTitle(post ? `${postTitle} | MDGA Forum` : 'Forum | MDGA');
@@ -397,6 +441,9 @@ export default function ForumPost() {
             {/* Owner / Officer actions */}
             {(isAuthor || showOfficerActions) && (
               <div className={styles.postOwnerActions}>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={openEditPost}>
+                  Edit post
+                </button>
                 {showOfficerActions && (
                   <>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={handleTogglePin}>
@@ -583,6 +630,40 @@ export default function ForumPost() {
           </div>
         </aside>
       </div>
+
+      {editOpen && (
+        <div className={styles.revisionsBackdrop} onClick={() => setEditOpen(false)} role="dialog" aria-modal="true">
+          <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
+            <header className={styles.revisionsHeader}>
+              <h2>Edit post</h2>
+              <button type="button" onClick={() => setEditOpen(false)} className={styles.revisionsClose} aria-label="Close">×</button>
+            </header>
+            <div className={styles.revisionsBody}>
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Title</span>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  maxLength={200}
+                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                />
+              </label>
+              <label style={{ display: 'block' }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Content (markdown supported)</span>
+                <MarkdownEditor value={editContent} onChange={setEditContent} rows={10} />
+              </label>
+              {editError && <p style={{ color: 'var(--color-red-light)', marginTop: 12 }}>{editError}</p>}
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditOpen(false)}>Cancel</button>
+                <button type="button" className="btn btn--primary btn--sm" onClick={submitEditPost} disabled={editSaving}>
+                  {editSaving ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showRevisions && (
         <div className={styles.revisionsBackdrop} onClick={() => setShowRevisions(false)} role="dialog" aria-modal="true">

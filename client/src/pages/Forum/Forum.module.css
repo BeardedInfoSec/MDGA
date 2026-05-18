@@ -1078,6 +1078,9 @@
 .forumReplyRail {
   position: relative;
   min-width: 0;
+  /* Push the rail down so its top edge aligns with the post card after the
+     "← Back to category" link that sits above the post in the content column. */
+  padding-top: calc(var(--font-size-xs) + var(--space-3));
 }
 
 .forumReplyRailSticky {
@@ -1209,6 +1212,36 @@
   padding: 1px 4px;
   margin-left: 4px;
   flex-shrink: 0;
+}
+
+.forumSidebarSensitive {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-red-light, #fca5a5);
+  background: rgba(185, 28, 28, 0.18);
+  border: 1px solid var(--color-red, #dc2626);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.forumTagSensitive {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--color-red-light, #fca5a5);
+  background: rgba(185, 28, 28, 0.18);
+  border: 1px solid var(--color-red, #dc2626);
+  border-radius: 3px;
+  padding: 2px 6px;
+  margin-left: var(--space-2);
+  vertical-align: middle;
 }
 
 /* ── Content column ── */

@@ -34,11 +34,12 @@ export default function ForumSidebar({ categories, activeCategoryId }) {
               <span className={styles.forumSidebarItemTitle}>All Categories</span>
             </Link>
             {(categories || []).map((cat) => {
-              const isActive = String(activeCategoryId) === String(cat.id);
+              const isActive = String(activeCategoryId) === String(cat.id)
+                              || String(activeCategoryId) === String(cat.slug || '');
               return (
                 <Link
                   key={cat.id}
-                  to={`/forum/category/${cat.id}`}
+                  to={`/forum/category/${cat.slug || cat.id}`}
                   className={`${styles.forumSidebarItem} ${isActive ? styles.forumSidebarItemActive : ''}`}
                   title={cat.description || cat.name}
                 >
@@ -52,6 +53,9 @@ export default function ForumSidebar({ categories, activeCategoryId }) {
                   <span className={styles.forumSidebarItemTitle}>{cat.name}</span>
                   {cat.officer_only ? (
                     <span className={styles.forumSidebarOfficer}>Officer</span>
+                  ) : null}
+                  {cat.age_restricted ? (
+                    <span className={styles.forumSidebarSensitive} title="Age-restricted (18+)">18+</span>
                   ) : null}
                   <span className={styles.forumSidebarItemCount}>{cat.post_count || 0}</span>
                 </Link>

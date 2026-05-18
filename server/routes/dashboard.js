@@ -20,8 +20,8 @@ router.get('/', requireAuth, async (req, res) => {
       [guildActivity],
       [guildAchievements],
     ] = await Promise.all([
-      pool.execute('SELECT COUNT(*) AS count FROM forum_posts WHERE user_id = ?', [userId]),
-      pool.execute('SELECT COUNT(*) AS count FROM forum_comments WHERE user_id = ?', [userId]),
+      pool.execute('SELECT COUNT(*) AS count FROM forum_posts WHERE user_id = ? AND deleted_at IS NULL', [userId]),
+      pool.execute('SELECT COUNT(*) AS count FROM forum_comments WHERE user_id = ? AND deleted_at IS NULL', [userId]),
       pool.execute('SELECT COUNT(*) AS count FROM user_characters WHERE user_id = ?', [userId]),
       pool.execute(`
         SELECT fp.id, fp.title, fp.category_id, fp.created_at, fp.view_count,
@@ -29,12 +29,12 @@ router.get('/', requireAuth, async (req, res) => {
           fc.name AS category_name,
           fc.age_restricted AS category_age_restricted,
           u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
-          (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id) AS comment_count,
+          (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id AND fc2.deleted_at IS NULL) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes
         FROM forum_posts fp
         JOIN forum_categories fc ON fc.id = fp.category_id
         JOIN users u ON u.id = fp.user_id
-        WHERE fc.officer_only = 0
+        WHERE fc.officer_only = 0 AND fp.deleted_at IS NULL
         ORDER BY fp.created_at DESC
         LIMIT 20
       `),
@@ -42,7 +42,7 @@ router.get('/', requireAuth, async (req, res) => {
         SELECT e.id, e.title,
           DATE_FORMAT(e.starts_at, '%Y-%m-%d %H:%i:%s') AS starts_at,
           DATE_FORMAT(e.ends_at, '%Y-%m-%d %H:%i:%s') AS ends_at,
-          e.timezone, e.category,
+          e.timezone, e.category, e.prize,
           (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'going') AS rsvp_going,
           (SELECT COUNT(*) FROM event_rsvps r WHERE r.event_id = e.id AND r.status = 'maybe') AS rsvp_maybe,
           (SELECT r.status FROM event_rsvps r WHERE r.event_id = e.id AND r.user_id = ? LIMIT 1) AS user_rsvp_status
@@ -54,13 +54,13 @@ router.get('/', requireAuth, async (req, res) => {
       pool.execute(`
         SELECT fp.id, fp.title, fp.created_at, fp.content,
           u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
-          (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id) AS comment_count,
+          (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id AND fc2.deleted_at IS NULL) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes,
           fp.view_count
         FROM forum_posts fp
         JOIN forum_categories fc ON fc.id = fp.category_id
         JOIN users u ON u.id = fp.user_id
-        WHERE fc.name = 'Guild Announcements'
+        WHERE fc.name = 'Guild Announcements' AND fp.deleted_at IS NULL
         ORDER BY fp.created_at DESC
         LIMIT 5
       `),

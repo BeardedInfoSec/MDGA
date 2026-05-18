@@ -139,6 +139,18 @@ export default function Profile() {
     setOverlayStatus('', '');
   };
 
+  // Deep-link from the first-time onboarding modal: ?addCharacter=1 auto-
+  // opens the add-character overlay so the user lands directly in the flow.
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    if (searchParams.get('addCharacter') !== '1') return;
+    openAddCharacterOverlay();
+    // Strip the query so a refresh doesn't re-open the overlay
+    if (window.history?.replaceState) {
+      window.history.replaceState({}, '', '/profile');
+    }
+  }, [isOwnProfile, searchParams]);
+
   const closeAddCharacterOverlay = () => {
     setOverlayOpen(false);
     setOverlaySearching(false);

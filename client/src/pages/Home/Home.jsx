@@ -5,6 +5,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
 import { formatEventTime } from '../../utils/timezone';
 import styles from './Home.module.css';
+import { postUrl } from '../../utils/forumUrls';
 
 const EVENT_TAG_CLASS = {
   pvp: styles.dashEventTagPvp,
@@ -320,7 +321,7 @@ export default function Home() {
                         }).slice(0, 6);
                         return filtered.length > 0
                           ? filtered.map((p) => (
-                              <Link key={p.id} to={`/forum/post/${p.id}`} className={styles.dashActivityItem}>
+                              <Link key={p.id} to={postUrl(p)} className={styles.dashActivityItem}>
                                 <span className={styles.dashActivityTitle}>{p.title}</span>
                                 <span className={styles.dashActivityMeta}>
                                   {p.category_name} &bull; {p.comment_count} replies &bull; {timeAgo(p.created_at)}

@@ -6,6 +6,7 @@ import { Alert } from '../../components/ui';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
+import { postUrlFromParts } from '../../utils/forumUrls';
 
 const FALLBACK_ICONS = {
   'General Discussion': '\u{1F4AC}',
@@ -44,7 +45,11 @@ export default function ForumNewPost() {
         const data = await res.json();
         const cats = data.categories || [];
         setAllCategories(cats);
-        const match = cats.find((c) => String(c.id) === String(slug));
+        // URL :slug param can be either a numeric id or a name-derived slug
+        const target = String(slug).toLowerCase();
+        const match = cats.find((c) =>
+          String(c.id) === target || String(c.slug || '').toLowerCase() === target
+        );
         setCategory(match || null);
       } catch {
         setAllCategories([]);
@@ -95,10 +100,19 @@ export default function ForumNewPost() {
         imageUrl = uploadData.imageUrl;
       }
 
+      // URL param can be numeric id OR slug. Prefer the loaded category's
+      // numeric id; fall back to parseInt(slug) only when it cleanly parses
+      // (so old numeric URLs still work even if category fetch hasn't landed).
+      const categoryId = category?.id ?? (Number.isInteger(Number(slug)) ? parseInt(slug, 10) : null);
+      if (!categoryId) {
+        setError('Could not resolve the category for this URL. Try opening the category from the forum page and clicking New Post from there.');
+        setSubmitting(false);
+        return;
+      }
       const res = await apiFetch('/forum/posts', {
         method: 'POST',
         body: JSON.stringify({
-          categoryId: parseInt(slug),
+          categoryId,
           title: title.trim(),
           content: content.trim(),
           imageUrl,
@@ -109,7 +123,7 @@ export default function ForumNewPost() {
         throw new Error(err.error || 'Failed to create post');
       }
       const data = await res.json();
-      navigate(`/forum/post/${data.id}`);
+      navigate(postUrlFromParts(data.id, title.trim()));
     } catch (err) {
       setError(err.message || 'Something went wrong');
       setSubmitting(false);

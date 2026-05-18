@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { formatEventDate, formatEventTimeOnly, getTimezoneAbbr, utcToDate } from '../../utils/timezone';
@@ -50,10 +50,11 @@ function useCountdown(events) {
         days: String(Math.floor(diff / (1000 * 60 * 60 * 24))).padStart(2, '0'),
         hours: String(Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))).padStart(2, '0'),
         mins: String(Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, '0'),
+        secs: String(Math.floor((diff % (1000 * 60)) / 1000)).padStart(2, '0'),
       });
     }
     update();
-    const id = setInterval(update, 30000); // every 30s is enough for a "in 2d 14h 7m" display
+    const id = setInterval(update, 1000); // 1s tick keeps the seconds counter alive
     return () => clearInterval(id);
   }, [events]);
   return countdown;
@@ -517,6 +518,25 @@ export default function Events() {
                               </div>
                               {event.description && (
                                 <p className={styles.agendaItemDesc}>{event.description}</p>
+                              )}
+                              {event.prize && (
+                                <div className={styles.agendaItemPrize} title="Prize for winners">
+                                  <span className={styles.agendaItemPrizeIcon} aria-hidden="true">★</span>
+                                  <span className={styles.agendaItemPrizeLabel}>Prize:</span>
+                                  <span className={styles.agendaItemPrizeValue}>{event.prize}</span>
+                                </div>
+                              )}
+                              {(event.created_by_name || event.created_by_username) && (
+                                <span className={styles.agendaItemOrganizer}>
+                                  Posted by{' '}
+                                  {event.created_by_id ? (
+                                    <Link to={`/profile?id=${event.created_by_id}`} className={styles.agendaItemOrganizerLink}>
+                                      {event.created_by_display_rank || event.created_by_name || event.created_by_username}
+                                    </Link>
+                                  ) : (
+                                    event.created_by_display_rank || event.created_by_name || event.created_by_username
+                                  )}
+                                </span>
                               )}
                               <div className={styles.agendaItemFooter}>
                                 {!isPast && (

@@ -109,7 +109,13 @@ function requireOfficer(req, res, next) {
 }
 
 function requireGuildMaster(req, res, next) {
-  if (!req.user || req.user.rank !== 'guildmaster') {
+  if (!req.user) return res.status(403).json({ error: 'Guild Master access required' });
+  // Accept actual guildmaster rank OR any role that grants admin.manage_roles
+  // — lets the website_guru RBAC role reach GM-gated pages (Discord role
+  // mappings, etc.) without needing the literal rank.
+  const isGM = req.user.rank === 'guildmaster';
+  const hasAdminRoles = req.user.permissions && req.user.permissions.includes('admin.manage_roles');
+  if (!isGM && !hasAdminRoles) {
     return res.status(403).json({ error: 'Guild Master access required' });
   }
   next();

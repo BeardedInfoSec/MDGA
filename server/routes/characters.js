@@ -33,6 +33,52 @@ function realmSlug(realmName) {
     'mal-ganis': 'malganis',
     zuljin: 'zuljin',
     "zul-jin": 'zuljin',
+    moknathal: 'moknathal',
+    'mok-nathal': 'moknathal',
+    quelthalas: 'quelthalas',
+    'quel-thalas': 'quelthalas',
+    queldorei: 'queldorei',
+    'quel-dorei': 'queldorei',
+    drakthul: 'drakthul',
+    'drak-thul': 'drakthul',
+    draktharon: 'draktharon',
+    'drak-tharon': 'draktharon',
+    chogall: 'chogall',
+    'cho-gall': 'chogall',
+    dathremar: 'dathremar',
+    "dath-remar": 'dathremar',
+    gnerzhul: 'nerzhul',
+    nerzhul: 'nerzhul',
+    'ner-zhul': 'nerzhul',
+    khaztgoroth: 'khazgoroth',
+    khazgoroth: 'khazgoroth',
+    'khaz-goroth': 'khazgoroth',
+    keljaeden: 'kiljaeden',
+    kiljaeden: 'kiljaeden',
+    'kil-jaeden': 'kiljaeden',
+    kelthuzad: 'kelthuzad',
+    'kel-thuzad': 'kelthuzad',
+    amanthul: 'amanthul',
+    'aman-thul': 'amanthul',
+    senjin: 'senjin',
+    'sen-jin': 'senjin',
+    veknilash: 'veknilash',
+    'vek-nilash': 'veknilash',
+    shuhalo: 'shuhalo',
+    "shu-halo": 'shuhalo',
+    eldrethalas: 'eldrethalas',
+    "eldre-thalas": 'eldrethalas',
+    makaru: 'makaru',
+    "mak-aru": 'makaru',
+    anubarak: 'anubarak',
+    "anub-arak": 'anubarak',
+    juebithos: 'jubeithos',
+    jubeithos: 'jubeithos',
+    "jubei-thos": 'jubeithos',
+    kaelthas: 'kaelthas',
+    "kael-thas": 'kaelthas',
+    guldan: 'guldan',
+    "gul-dan": 'guldan',
   };
 
   return aliases[normalized] || normalized;
@@ -48,12 +94,9 @@ router.post('/lookup', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'characterName and realm are required' });
     }
 
-    // Realm restriction — derived from the registered child guilds.
-    if (!(await guildRegistry.isRealmRegistered(realm))) {
-      return res.status(400).json({
-        error: `This realm has no registered guild in our federation. Allowed realms: ${(await guildRegistry.getRegisteredRealmSlugs()).join(', ')}.`,
-      });
-    }
+    // Realm is not pre-restricted — any realm is fair game; the gate is the
+    // guild check below (character must be in an MDGA or MEGA federation
+    // guild, regardless of which realm they play on).
 
     const slug = realmSlug(realm);
     console.log(`[Character lookup] Searching for ${characterName} on ${slug}`);
@@ -62,22 +105,21 @@ router.post('/lookup', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Character not found on World of Warcraft Armory' });
     }
 
-    // Guild verification — accept any character whose (guild_name, realm_slug)
-    // matches a registered child guild in the federation.
-    const matchedGuild = await guildRegistry.findGuild({
-      guildName: profile.guild_name,
-      realmSlug: profile.realm_slug || slug,
-    });
+    // Guild verification — accept any character whose guild NAME matches one
+    // of our federation guilds, regardless of realm. Members are spread
+    // across every WoW server, so realm matching would block legitimate
+    // members on realms with no registered branch.
+    const matchedGuild = await guildRegistry.findGuildByName(profile.guild_name);
     if (!matchedGuild) {
       const accepted = await acceptedGuildNamesLabel();
-      console.log(`[Character lookup] Guild check failed: "${profile.guild_name}" on "${profile.realm_slug || slug}" not registered`);
+      console.log(`[Character lookup] Guild check failed: "${profile.guild_name}" on "${profile.realm_slug || slug}" not a federation guild`);
       return res.status(403).json({
         error: profile.guild_name
           ? `This character is in <${profile.guild_name}>, not in any of our federation guilds (${accepted}).`
           : `This character is not in a guild. Only members of ${accepted} can be added.`,
       });
     }
-    console.log(`[Character lookup] Guild verified: ${profile.guild_name} (guild_id=${matchedGuild.id})`);
+    console.log(`[Character lookup] Guild verified by name: ${profile.guild_name} (matched guild_id=${matchedGuild.id})`);
 
     const resolvedRealm = profile.realm_name || realm;
     const resolvedRealmSlug = profile.realm_slug || realmSlug(resolvedRealm);
@@ -153,12 +195,7 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'characterName and realm are required' });
     }
 
-    // Realm restriction — derived from the registered child guilds.
-    if (!(await guildRegistry.isRealmRegistered(realm))) {
-      return res.status(400).json({
-        error: `This realm has no registered guild in our federation. Allowed realms: ${(await guildRegistry.getRegisteredRealmSlugs()).join(', ')}.`,
-      });
-    }
+    // Realm is not pre-restricted — gate is the guild membership check below.
 
     const requestedName = String(characterName).trim();
     const requestedRealm = String(realm).trim();
@@ -176,22 +213,19 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Character not found on World of Warcraft Armory.' });
     }
 
-    // Guild verification — accept any character whose (guild_name, realm_slug)
-    // matches a registered child guild in the federation.
-    const matchedGuild = await guildRegistry.findGuild({
-      guildName: profile.guild_name,
-      realmSlug: profile.realm_slug || requestedSlug,
-    });
+    // Guild verification — accept any character whose guild NAME matches one
+    // of our federation guilds, regardless of realm.
+    const matchedGuild = await guildRegistry.findGuildByName(profile.guild_name);
     if (!matchedGuild) {
       const accepted = await acceptedGuildNamesLabel();
-      console.log(`[Character add] Guild check failed: "${profile.guild_name}" on "${profile.realm_slug || requestedSlug}" not registered`);
+      console.log(`[Character add] Guild check failed: "${profile.guild_name}" on "${profile.realm_slug || requestedSlug}" not a federation guild`);
       return res.status(403).json({
         error: profile.guild_name
           ? `This character is in <${profile.guild_name}>, not in any of our federation guilds (${accepted}).`
           : `This character is not in a guild. Only members of ${accepted} can be added.`,
       });
     }
-    console.log(`[Character add] Guild verified: ${profile.guild_name} (guild_id=${matchedGuild.id})`);
+    console.log(`[Character add] Guild verified by name: ${profile.guild_name} (matched guild_id=${matchedGuild.id})`);
 
     const safeInt = (value) => {
       if (value === null || value === undefined || value === '') return null;

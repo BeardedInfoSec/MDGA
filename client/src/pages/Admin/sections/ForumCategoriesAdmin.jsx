@@ -27,6 +27,7 @@ function emptyCategory() {
     sort_order: 0,
     officer_only: 0,
     age_restricted: 0,
+    officer_post_only: 0,
   };
 }
 
@@ -64,6 +65,7 @@ export default function ForumCategoriesAdmin({ apiFetch, showToast }) {
       sort_order: cat.sort_order || 0,
       officer_only: cat.officer_only ? 1 : 0,
       age_restricted: cat.age_restricted ? 1 : 0,
+      officer_post_only: cat.officer_post_only ? 1 : 0,
     });
   }
 
@@ -85,6 +87,7 @@ export default function ForumCategoriesAdmin({ apiFetch, showToast }) {
           sort_order: draft.sort_order,
           officer_only: !!draft.officer_only,
           age_restricted: !!draft.age_restricted,
+          officer_post_only: !!draft.officer_post_only,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -327,6 +330,15 @@ function DraftEditor({ draft, setDraft, save, cancel, quickEmoji }) {
                 onChange={(e) => field('age_restricted', e.target.checked ? 1 : 0)}
               />
               <span>Age-restricted (show 18+ confirmation modal once per visitor)</span>
+            </label>
+
+            <label className={styles.formCheckbox}>
+              <input
+                type="checkbox"
+                checked={!!draft.officer_post_only}
+                onChange={(e) => field('officer_post_only', e.target.checked ? 1 : 0)}
+              />
+              <span>Officer-post-only (only officers can start new threads; everyone can read &amp; reply)</span>
             </label>
           </div>
         </div>

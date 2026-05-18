@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCcw, Trash2, RefreshCw } from 'lucide-react';
 import styles from './RecycleBinAdmin.module.css';
+import { postUrlFromParts } from '../../../utils/forumUrls';
 
 export default function RecycleBinAdmin({ apiFetch, showToast }) {
   const [posts, setPosts] = useState([]);
@@ -114,7 +115,7 @@ export default function RecycleBinAdmin({ apiFetch, showToast }) {
                 <div className={styles.cardHead}>
                   <div className={styles.cardMeta}>
                     <span className={styles.cardTitle}>
-                      Reply on <Link to={`/forum/post/${c.post_id}`} className={styles.cardLink}>{c.post_title || `post #${c.post_id}`}</Link>
+                      Reply on <Link to={postUrlFromParts(c.post_id, c.post_title)} className={styles.cardLink}>{c.post_title || `post #${c.post_id}`}</Link>
                     </span>
                     <span className={styles.cardMetaDim}>
                       by {c.display_name || c.username || `user #${c.user_id}`}

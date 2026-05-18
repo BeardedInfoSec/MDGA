@@ -4,6 +4,7 @@ import Nav from './Nav';
 import Footer from './Footer';
 import BackToTop from '../common/BackToTop';
 import AppShell from './AppShell';
+import CharacterOnboardingModal from '../common/CharacterOnboardingModal';
 import useSiteBackground from '../../hooks/useSiteBackground';
 
 export default function Layout() {
@@ -28,6 +29,7 @@ export default function Layout() {
       </main>
       <Footer />
       <BackToTop />
+      <CharacterOnboardingModal />
     </AppShell>
   );
 }

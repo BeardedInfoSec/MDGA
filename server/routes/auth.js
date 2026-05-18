@@ -223,6 +223,18 @@ router.get('/me', requireAuth, async (req, res) => {
   } catch (err) {
     console.warn('[/auth/me] main faction lookup failed:', err.message);
   }
+  // Lightweight character-count tag so the frontend can decide whether to
+  // show the first-time onboarding modal. Single COUNT, no per-row overhead.
+  let characterCount = 0;
+  try {
+    const [[row]] = await pool.execute(
+      'SELECT COUNT(*) AS n FROM user_characters WHERE user_id = ?',
+      [req.user.id]
+    );
+    characterCount = row.n || 0;
+  } catch (err) {
+    console.warn('[/auth/me] character count lookup failed:', err.message);
+  }
   res.json({
     user: {
       id: req.user.id,
@@ -236,6 +248,7 @@ router.get('/me', requireAuth, async (req, res) => {
       timezone: req.user.timezone,
       permissions: req.user.permissions || [],
       mainFaction,
+      characterCount,
     },
   });
 });

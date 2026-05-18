@@ -59,6 +59,58 @@ async function findGuild({ guildName, realmSlug }) {
   ) || null;
 }
 
+// Name-only match. Accepts any character whose guild name matches one of
+// the federation guilds, regardless of realm. Used by character add — we
+// don't want to gate on realm registration since members are spread across
+// every WoW server. Returns the first matching guild row (for FK linkage)
+// or null.
+async function findGuildByName(guildName) {
+  if (!guildName) return null;
+  const targetName = normalizeName(guildName);
+  const guilds = await getGuilds();
+  return guilds.find((g) => normalizeName(g.name) === targetName) || null;
+}
+
+// Ensure a (guildName, realmSlug) pair is registered. If a row already
+// exists, return it. Otherwise insert a new row and return that. The new
+// row mirrors the canonical name + faction of an existing federation guild
+// with the same name (so the auto-extension stays consistent), and starts
+// with member_count=0 / last_synced_at=NULL so the next sync pulls roster.
+// Returns the guild row (existing or new), or null if guildName isn't a
+// federation guild at all (caller should reject before reaching here).
+async function ensureGuildRegistered({ guildName, realmSlug }) {
+  if (!guildName || !realmSlug) return null;
+  const normalizedSlug = normalizeSlug(realmSlug);
+
+  // Already registered on this realm? Use the (name, realm) tuple matcher.
+  const existing = await findGuild({ guildName, realmSlug: normalizedSlug });
+  if (existing) return existing;
+
+  // Federation membership check — only auto-register if the NAME is one of
+  // our known federation guilds (prevents arbitrary guilds being added).
+  const peer = await findGuildByName(guildName);
+  if (!peer) return null;
+
+  const nameSlug = String(guildName)
+    .toLowerCase()
+    .replace(/[' ]/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+
+  await pool.execute(
+    `INSERT INTO guilds (name, realm_slug, name_slug, faction, is_primary)
+     VALUES (?, ?, ?, ?, FALSE)
+     ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+    [peer.name, normalizedSlug, nameSlug, peer.faction]
+  );
+
+  invalidate(); // bust cache so the new row is visible immediately
+  const [rows] = await pool.execute(
+    'SELECT id, name, realm_slug, name_slug, faction, is_primary FROM guilds WHERE name_slug = ? AND realm_slug = ?',
+    [nameSlug, normalizedSlug]
+  );
+  return rows[0] || null;
+}
+
 async function getPrimaryGuild() {
   const guilds = await getGuilds();
   return guilds.find((g) => g.is_primary) || guilds[0] || null;
@@ -87,6 +139,7 @@ async function filterRegisteredRealmNames(realmNames) {
 
 module.exports = {
   findGuild,
+  findGuildByName,
   getGuilds,
   getPrimaryGuild,
   getRegisteredRealmSlugs,

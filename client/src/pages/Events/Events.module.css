@@ -589,6 +589,54 @@
   margin: 0;
 }
 
+.agendaItemPrize {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  padding: 4px 10px;
+  background: linear-gradient(180deg, rgba(212, 175, 55, 0.14), rgba(212, 175, 55, 0.04));
+  border: 1px solid var(--color-gold-dark);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-gold-light, var(--color-gold));
+}
+
+.agendaItemPrizeIcon {
+  color: var(--color-gold);
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.agendaItemPrizeLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-gold);
+}
+
+.agendaItemPrizeValue {
+  font-family: var(--font-display);
+  color: var(--color-gold);
+  letter-spacing: 0.5px;
+}
+
+.agendaItemOrganizer {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
+.agendaItemOrganizerLink {
+  color: var(--color-gold);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--color-gold-dark);
+}
+.agendaItemOrganizerLink:hover { color: var(--color-gold-light); border-bottom-color: var(--color-gold); }
+
 .agendaItemFooter {
   display: flex;
   align-items: center;

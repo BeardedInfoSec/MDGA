@@ -234,7 +234,10 @@ router.get('/callback', async (req, res) => {
 
     if (member) {
       // In guild — activate account and sync rank/roles from Discord
-      await pool.execute('UPDATE users SET status = ? WHERE id = ?', ['active', user.id]);
+      await pool.execute(
+        'UPDATE users SET status = ?, last_login_at = NOW() WHERE id = ?',
+        ['active', user.id]
+      );
 
       const syncResult = await syncUserRolesFromDiscord(user.id, member);
       const newRank = syncResult.rank;
@@ -243,6 +246,13 @@ router.get('/callback', async (req, res) => {
       // Load permissions and issue JWT
       const permissions = await loadUserPermissions(user.id);
       const jwt = signToken({ id: user.id, username: user.username, rank: newRank }, permissions);
+      let characterCount = 0;
+      try {
+        const [[ccRow]] = await pool.execute(
+          'SELECT COUNT(*) AS n FROM user_characters WHERE user_id = ?', [user.id]
+        );
+        characterCount = ccRow.n || 0;
+      } catch (_) {}
       const userPayload = {
         id: user.id,
         username: user.username,
@@ -254,6 +264,7 @@ router.get('/callback', async (req, res) => {
         characterName: user.character_name,
         timezone: user.timezone,
         permissions,
+        characterCount,
       };
 
       const grantCode = createLoginGrant(jwt, userPayload);
@@ -273,6 +284,7 @@ router.get('/callback', async (req, res) => {
       // with a flag so the frontend can show the Discord invite
       if (user.status === 'active') {
         console.log(`[Discord OAuth] User ${discordUsername} is active but NOT in Discord — sending needsDiscord flag`);
+        await pool.execute('UPDATE users SET last_login_at = NOW() WHERE id = ?', [user.id]);
         const [freshUser] = await pool.execute('SELECT * FROM users WHERE id = ?', [user.id]);
         const permissions = await loadUserPermissions(user.id);
         const jwt = signToken({ id: user.id, username: user.username, rank: freshUser[0].rank }, permissions);

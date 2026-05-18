@@ -11,7 +11,9 @@ import EventScreenshotsModal from './sections/EventScreenshotsModal';
 import AuditToolAdmin from './sections/AuditToolAdmin';
 import AuditLogAdmin from './sections/AuditLogAdmin';
 import RecycleBinAdmin from './sections/RecycleBinAdmin';
+import AdminStats from './sections/AdminStats';
 import styles from './Admin.module.css';
+import { postUrlFromParts } from '../../utils/forumUrls';
 
 const RANK_ORDER = ['recruit', 'member', 'veteran', 'officer', 'guildmaster'];
 const CATEGORY_OPTIONS = [
@@ -782,7 +784,7 @@ export default function Admin() {
 
   // ── Event handlers ──
   const openAddEvent = () => {
-    setEventForm({ title: '', startsAt: '', endsAt: '', timezone: userTimezone, category: 'pvp', description: '', recurrence: { enabled: false, type: 'weekly', count: 4, customDays: 7 } });
+    setEventForm({ title: '', startsAt: '', endsAt: '', timezone: userTimezone, category: 'pvp', description: '', prize: '', recurrence: { enabled: false, type: 'weekly', count: 4, customDays: 7 } });
     setEventModal({ mode: 'add' });
   };
 
@@ -795,6 +797,7 @@ export default function Admin() {
       timezone: tz,
       category: ev.category,
       description: ev.description || '',
+      prize: ev.prize || '',
     });
     setEventModal({ mode: 'edit', event: ev });
   };
@@ -1752,6 +1755,11 @@ export default function Admin() {
           <AuditToolAdmin apiFetch={apiFetch} showToast={showToast} />
         )}
 
+        {/* ── Statistics Tab ── */}
+        {activeTab === 'stats' && (
+          <AdminStats apiFetch={apiFetch} showToast={showToast} />
+        )}
+
         {/* ── Audit Log Tab ── */}
         {activeTab === 'audit-log' && (
           <AuditLogAdmin apiFetch={apiFetch} showToast={showToast} />
@@ -2032,13 +2040,13 @@ export default function Admin() {
                   <div className={styles.reportReason}>{report.reason || 'No reason provided'}</div>
                   <div className={styles.reportLinks}>
                     {report.target_post_id && (
-                      <Link to={`/forum/post/${report.target_post_id}`} className={styles.reportLink}>
+                      <Link to={postUrlFromParts(report.target_post_id, report.target_post_title)} className={styles.reportLink}>
                         View Post
                       </Link>
                     )}
                     {report.target_comment_id && (report.comment_post_id || report.target_post_id) && (
                       <Link
-                        to={`/forum/post/${report.comment_post_id || report.target_post_id}`}
+                        to={postUrlFromParts(report.comment_post_id || report.target_post_id, report.target_post_title)}
                         className={styles.reportLink}
                       >
                         View Comment Context
@@ -3371,6 +3379,17 @@ export default function Admin() {
                 <textarea
                   value={eventForm.description}
                   onChange={(e) => setEventForm((f) => ({ ...f, description: e.target.value }))}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>Prize <span style={{ opacity: 0.6, fontWeight: 400 }}>(optional)</span></label>
+                <input
+                  type="text"
+                  value={eventForm.prize || ''}
+                  onChange={(e) => setEventForm((f) => ({ ...f, prize: e.target.value.slice(0, 255) }))}
+                  placeholder="e.g. 5,000g, BoE epic, bragging rights"
+                  maxLength={255}
                 />
               </div>
 
