@@ -4,16 +4,22 @@ Complete documentation for the MDGA guild website: installation, configuration, 
 
 ---
 
-## Recent Updates (v1.2.0)
+## Recent Updates (v1.3.0)
 
-- **Guild ↔ Discord Reconciliation**: New admin tab cross-references in-game guild roster against Discord membership. Officers can link mismatched rows to site users, mark rows as "ignored", and paste addon JSON to backfill officer/public notes when the live `/api/addon/sync` endpoint isn't wired up. Backed by `server/routes/reconciliation.js` and `db/migration-041-reconciliation.sql`.
-- **Roster Note Column**: Officer Note column now displayed on the guild roster view. Notes come from the WoW addon (officer/public notes captured client-side and shipped via sync or paste).
-- **Generate Report Countdown**: Member Activity / Guild Gaps report builders now show a robust countdown while the server collates results (replaces the previous spinner-only state).
-- **Addon Schema v4**: Server now accepts both schema v3 and v4. v4 adds `officerNote`, `publicNote`, and `lastSeen` per roster entry.
-- **Addon Allowlist**: Specific characters can be whitelisted (`ns.ALLOWLIST` in `wow_addon/MDGA/Core.lua`) to use the addon regardless of in-game rank — useful for testing and for officers whose main is on an alt account.
-- **Officer-check de-duplication**: Addon no longer re-spams the "not an officer" warning on every zone change (tracks `ns.lastOfficerWarnRank`).
-- **Roster CSV filename**: Guild roster CSV exports now include guild name + timestamp for easier archival.
-- **Guild Verification**: Character validation enforces guild membership in "MAKE DUROTAR GREAT AGAIN" (case-insensitive matching). Duplicate character claims are blocked via a unique `(user_id, character_name, realm_slug)` constraint.
+- **Federation / multi-guild support**: The `guilds` table now hosts all MDGA realms + the Alliance "Make Elwynn Great Again" branch on Moon Guard. `user_characters.guild_id` links each linked character to a specific child guild. Admin > Guild surfaces the full federation roster, and the game-rank mapping editor is per-guild. Backed by `db/migration-042-child-guilds.sql`.
+- **Admin sidebar layout**: The old top-tab admin panel was replaced with a grouped sidebar (Overview, People, Guild, Moderation, Content). Section files live under `client/src/pages/Admin/sections/`. See [Section 18](#18-admin-panel).
+- **Audit log + recycle bin + post revisions**: Every officer/admin action is recorded to `admin_actions`. Deleted forum posts/comments are soft-deleted via `deleted_at`/`deleted_by` and can be restored from the Recycle Bin tab. Edited posts capture a `forum_post_revisions` row so admins can diff against the prior content. Migration-048 adds the columns + the `admin.view_audit_log` / `admin.manage_recycle_bin` permissions.
+- **Account locks**: Admins can lock a member account (timed or indefinite) — `account_locked_at`, `account_locked_until`, `account_locked_reason` on `users`. Gated by `admin.manage_account_lock`.
+- **Per-user rank lock**: A user row marked locked (`rank_locked = 1`) is skipped entirely by the periodic Discord-role sync, so a manually-set rank stays put. Gated by `users.manage_overrides` (Member Overrides tab).
+- **Display rank**: `users.display_rank` (Honorbound, Champion, Durotarian, etc.) shows the authentic faction-specific badge while `users.rank` continues to drive RBAC.
+- **Forum category customization**: Per-category icon, color, and accent override the legacy hardcoded map. Categories also gained `age_restricted` (one-time 18+ consent modal, UX-only) and `officer_post_only` (officers start threads, anyone replies).
+- **Event prize + recap screenshots**: Events can carry a free-text `prize` field and per-event screenshot uploads. Past events render a recap gallery on `/events`.
+- **Guild rank-change alerts (de-duplicated)**: `processRankChanges` now only posts an officer alert when the new in-game rank actually maps to a managed Discord role or a different site rank. Avoids spamming the channel when the addon reports flips between unmapped ranks. The addon sync route no longer sends its own duplicate alert.
+- **PM2 fork mode pinned**: `ecosystem.config.js` sets `exec_mode: 'fork'` so the `interpreter` (nvm Node 24) is honored. Cluster mode would fall back to PM2's own Node, which is the system Node 12 on the current production box and crashes on modern syntax.
+- **Audit Tool admin tab**: The `tools/mdga-audit/` Excel report generator is now launched from inside the admin panel.
+- **Guild ↔ Discord Reconciliation** (v1.2): Cross-references in-game guild roster against Discord membership. Officers can link mismatched rows to site users, mark rows as "ignored", and paste addon JSON to backfill officer/public notes. Backed by `server/routes/reconciliation.js` and `db/migration-041-reconciliation.sql`.
+- **Addon Schema v3+v4** (v1.2): Server accepts both schema versions. v4 adds `officerNote`, `publicNote`, and `lastSeen` per roster entry.
+- **Guild Verification**: Character validation enforces guild membership in "MAKE DUROTAR GREAT AGAIN" (case-insensitive). Duplicate character claims are blocked via a unique `(user_id, character_name, realm_slug)` constraint.
 
 ---
 
@@ -43,14 +49,14 @@ Complete documentation for the MDGA guild website: installation, configuration, 
 22. [Reports & Analytics](#22-reports--analytics)
 23. [Security](#23-security)
 24. [Database](#24-database)
-25. [API Reference](#25-api-reference)
+25. [API Reference](#25-api-reference) — Auth, Config, Dashboard, Characters, Profile, Leaderboard, Forum, Events, Applications, Users, Guild, Roles, Discord Roles, Upload & Carousel, Reports, Admin, Addon, Reconciliation
 26. [Troubleshooting](#26-troubleshooting)
 
 ---
 
 ## 1. Overview
 
-MDGA is a full-stack web application for the World of Warcraft guild **Make Durotar Great Again** on Tichondrius-US. It provides guild management, a forum, event scheduling, PvP/PvE leaderboards, character profiles synced from Blizzard's API, Discord integration, and a full admin panel.
+MDGA is a full-stack web application for the World of Warcraft guild **Make Durotar Great Again** — based on Tichondrius-US with a multi-realm federation that spans Area 52, Illidan, Sargeras, and other realms, plus an Alliance branch (Make Elwynn Great Again on Moon Guard). It provides guild management, a forum, event scheduling, PvP/PvE leaderboards, character profiles synced from Blizzard's API, Discord integration, and a full admin panel with audit log + recycle bin.
 
 | Layer | Technology |
 |-------|-----------|
@@ -99,18 +105,19 @@ nano .env
 bash setup.sh
 ```
 
-The setup script handles all 10 steps:
+The setup script handles all 11 steps:
 
 1. Checks prerequisites (Node 18+, npm, MySQL client)
-2. Validates `.env` configuration
+2. Validates `.env` configuration (creates from template if missing)
 3. Installs server dependencies (`npm install` — includes `sharp` for image compression)
 4. Installs client dependencies and builds the React frontend
 5. Creates `uploads/` and `logs/` directories
 6. Initializes the database (schema + all migrations)
 7. Seeds a default admin account (`admin` / `admin` — change immediately)
-8. Installs PM2 globally
-9. Displays PM2 startup commands
-10. Verifies all required environment variables
+8. Seeds default forum categories and events (`db/seed-forum-events.sql`)
+9. Installs PM2 globally
+10. Displays PM2 startup commands
+11. Verifies all required environment variables
 
 ### Manual Setup
 
@@ -169,6 +176,7 @@ Create a `.env` file in the project root. Every variable is documented below.
 | `DISCORD_OFFICER_CHANNEL_ID` | Yes | `123456789` | Channel for officer alerts and approval embeds |
 | `DISCORD_REDIRECT_URI` | Yes | `https://mdga.dev/api/auth/discord/callback` | OAuth callback URL. Must match Discord app settings. |
 | `DISCORD_WEBHOOK_URL` | No | `https://discord.com/api/webhooks/...` | Webhook for application notifications |
+| `DISCORD_INVITE_URL` | No | `https://discord.gg/abc123` | Static invite link embedded in approval emails when the bot can't mint a one-time invite |
 
 ### Blizzard API
 
@@ -177,12 +185,14 @@ Create a `.env` file in the project root. Every variable is documented below.
 | `BLIZZARD_CLIENT_ID` | Yes | `105c4e8...` | Battle.net app Client ID |
 | `BLIZZARD_CLIENT_SECRET` | Yes | `1UUne1i...` | Battle.net app Client Secret |
 
-### reCAPTCHA
+### reCAPTCHA (legacy — currently unused)
+
+The application form's reCAPTCHA hook was removed when the form moved to Discord-OAuth-only entry. The `.env` template and `setup.sh` still ship these keys so they can be reconnected without a schema change, but the server does not read them today.
 
 | Variable | Required | Example | Description |
 |----------|:--------:|---------|-------------|
-| `RECAPTCHA_SITE_KEY` | No | `6Lcv...` | Google reCAPTCHA v2 site key (for application form) |
-| `RECAPTCHA_SECRET_KEY` | No | `6Lcv...` | Google reCAPTCHA v2 secret key |
+| `RECAPTCHA_SITE_KEY` | No | `6Lcv...` | Reserved for future re-enable. Not consumed by server code. |
+| `RECAPTCHA_SECRET_KEY` | No | `6Lcv...` | Reserved for future re-enable. Not consumed by server code. |
 
 ### Email (SMTP)
 
@@ -340,29 +350,36 @@ MDGA/
 │   │   ├── auth.js           # JWT auth, role/permission middleware
 │   │   └── upload.js         # Multer + magic byte validation + sharp compression
 │   ├── routes/
-│   │   ├── auth.js           # Login, logout, password, /me
+│   │   ├── auth.js           # Login, logout, password, /me, companion-token
 │   │   ├── discord.js        # Discord OAuth2 flow + role sync
 │   │   ├── discord-roles.js  # Discord-to-site role mapping
 │   │   ├── config.js         # Public config (allowed realms)
-│   │   ├── events.js         # Event CRUD + RSVP
+│   │   ├── events.js         # Event CRUD + RSVP + screenshots + addon-export
 │   │   ├── applications.js   # Guild applications
-│   │   ├── forum.js          # Forum categories, posts, comments, votes
-│   │   ├── users.js          # User management (admin)
+│   │   ├── forum.js          # Categories, posts, comments, votes, reports
+│   │   ├── users.js          # User management + rank-lock
 │   │   ├── characters.js     # Character CRUD + Blizzard validation
 │   │   ├── profile.js        # User profile endpoint
 │   │   ├── leaderboard.js    # PvP/PvE leaderboard + stat refresh
 │   │   ├── roles.js          # RBAC role management
 │   │   ├── dashboard.js      # Dashboard data
-│   │   ├── guild.js          # Guild roster + member management
+│   │   ├── guild.js          # Multi-guild federation + roster + game-rank mappings + bans
 │   │   ├── carousel.js       # Carousel images + site settings
 │   │   ├── upload.js         # Image upload endpoint
 │   │   ├── reports.js        # Admin reports + analytics
 │   │   ├── reconciliation.js # Guild ↔ Discord reconciliation + addon paste ingest
-│   │   └── addon.js          # WoW addon sync endpoint
+│   │   ├── addon.js          # WoW addon sync endpoint
+│   │   └── admin.js          # Admin stats, audit log, recycle bin, account locks, character overrides
 │   └── services/
-│       ├── character-sync.js # Character stat refresh scheduler
-│       ├── guild-sync.js     # Guild roster sync from Blizzard
-│       └── email.js          # SMTP email sending
+│       ├── character-sync.js       # Per-character stat refresh from Blizzard
+│       ├── character-scheduler.js  # 2h scheduler that drives character-sync + drops non-members
+│       ├── guild-sync.js           # Guild roster sync + rank-change reconciler
+│       ├── guild-stats-sync.js     # Guild-wide leaderboard aggregate refresh
+│       ├── guild-registry.js       # In-memory cache of child-guild rows
+│       ├── discord-member-sync.js  # Caches Discord guild members for reconciliation
+│       ├── discord-role-sync.js    # Periodic Discord-role → site-rank reconciliation
+│       ├── audit-log.js            # Writer for admin_actions rows
+│       └── email.js                # SMTP email sending
 ├── client/                   # React SPA (Vite)
 │   ├── src/
 │   │   ├── App.jsx           # Router definition
@@ -378,16 +395,21 @@ MDGA/
 │   │   │   ├── Join/         # Application form
 │   │   │   ├── Story/        # Guild lore timeline
 │   │   │   ├── Leadership/   # Leadership roster
-│   │   │   ├── Events/       # Calendar + RSVP
+│   │   │   ├── Events/       # Calendar + RSVP + recap screenshots
 │   │   │   ├── Forum/        # Index, Category, Post, NewPost
 │   │   │   ├── Leaderboards/ # PvP/PvE rankings
 │   │   │   ├── Profile/      # User profile + characters
-│   │   │   └── Admin/        # Admin panel (6+ tabs)
+│   │   │   └── Admin/        # Sidebar-grouped admin panel
+│   │   │       ├── AdminLayout.jsx  # Sidebar shell + nav groups
+│   │   │       └── sections/        # Overview, AuditLog, AuditTool, RecycleBin, Members,
+│   │   │                            # Forum Categories, EventScreenshotsModal, etc.
 │   │   ├── hooks/            # useDocumentTitle
 │   │   ├── utils/            # helpers, timezone
 │   │   └── data/             # leaderboardData, wowData
 │   └── vite.config.js        # Build config + dev proxy
-├── db/                       # SQL schema + 40 migration files
+├── db/                       # SQL schema + 53 migration files
+├── tools/mdga-audit/         # Standalone Excel audit-report generator (consumes the WoW addon's SavedVariables)
+├── wow_addon/MDGA/           # In-game WoW addon (Lua) — captures roster, officer notes, rank changes
 ├── uploads/                  # User-uploaded images (compressed WebP)
 ├── images/                   # Static site images
 ├── logs/                     # PM2 log files
@@ -531,6 +553,11 @@ Fine-grained permission system layered on top of ranks. Users can have multiple 
 | `admin.manage_applications` | Admin | Review guild applications |
 | `admin.manage_users` | Admin | Change ranks, ban/delete users |
 | `admin.manage_roles` | Admin | Create/edit/delete roles |
+| `admin.view_audit_log` | Admin | View the admin action audit log |
+| `admin.manage_account_lock` | Admin | Lock/unlock member accounts (timed or indefinite) |
+| `admin.manage_recycle_bin` | Admin | View and restore soft-deleted forum content |
+| `users.manage_characters` | Admin | Edit any member's linked characters (set main / delete) |
+| `users.manage_overrides` | Admin | Member Overrides tab — pin a user's rank so Discord-role sync skips them |
 | `leaderboard.bulk_refresh` | Leaderboard | Refresh all character stats |
 | `guild.manage` | Guild | Manage guild sync and roster |
 | `guild.view_roster` | Guild | View full guild roster |
@@ -627,12 +654,13 @@ Character stats refresh automatically:
 
 ### Guild Sync
 
-The server periodically syncs the full guild roster from Blizzard:
+The server periodically syncs every registered child guild's roster from Blizzard:
 
-- Fetches all guild members (name, realm, level, class, race, rank)
+- Fetches all guild members (name, realm, level, class, race, rank) for each child guild in the federation (`guilds` table, see migration-042)
 - Cross-links guild members to site users by matching character name + realm
-- Stores data in the `guild_members` table
+- Stores data in the `guild_members` table with the child-guild FK
 - Syncs guild achievements to `guild_achievements`
+- Rank-change detection feeds `processRankChanges` in `server/services/guild-sync.js`, which only posts an officer alert when the new rank maps to a managed Discord role or a different site rank — preventing alert spam on flips between unmapped ranks
 
 ### Guild Roster (Admin)
 
@@ -698,7 +726,12 @@ Click any row in the leaderboard to expand and view the character's full stat ca
 | **View tracking** | Unique views per user per post |
 | **Pinned posts** | Stick important posts to the top |
 | **Locked posts** | Prevent new comments |
-| **Officer categories** | Restrict access to officers+ |
+| **Officer categories** | Fully gates a category to officers+ (`officer_only`) |
+| **Officer-post-only categories** | Only officers can start threads; anyone can read + reply (`officer_post_only`). Use for announcement-style categories. |
+| **Age-restricted categories** | One-time 18+ consent modal before entering. UX-only; not access control. |
+| **Per-category customization** | Per-category icon, color, and accent override the legacy hardcoded map (migration-044). |
+| **Edit + revision history** | Authors can edit their posts; the prior content is captured in `forum_post_revisions` so admins can diff. |
+| **Soft-delete + Recycle Bin** | Deleted posts/comments are `deleted_at`-stamped and restorable from Admin > Recycle Bin (gated by `admin.manage_recycle_bin`). |
 | **Reporting** | Members can report posts/comments for review |
 | **Image attachments** | One image per post or comment (auto-compressed to WebP) |
 
@@ -734,9 +767,11 @@ Users with `events.manage` permission can create events:
 |-------|-------------|
 | Title | Event name (max 150 chars) |
 | Description | Full event details |
+| Prize | Optional free-text prize description (e.g. "200 gold", "BoE set + 5k", "Bragging rights") |
 | Category | PvP, Defense, Social, or Raid |
 | Start/End Time | Date and time with timezone support |
 | Recurring | Optional: weekly, biweekly, or custom interval (2-52 instances) |
+| Recap screenshots | After the event, officers can attach screenshots that render as a gallery on the public `/events` page |
 
 ### RSVP
 
@@ -811,67 +846,46 @@ Each character card shows:
 
 ## 18. Admin Panel
 
-Accessible at `/admin` for officers and users with `admin.view_panel` permission.
+Accessible at `/admin` for officers and users with `admin.view_panel` permission. The panel uses a grouped sidebar (see `client/src/pages/Admin/AdminLayout.jsx`). Sidebar items hide themselves if the viewer lacks the gating permission; the Guild Master role short-circuits all gates.
 
-### Tab: Members
+### Group: Overview
 
-- View all registered users with rank badges
-- Search by username or display name
-- **Change Rank** — Promote/demote (hierarchy enforced — can't promote above your own rank)
-- **Ban** — Ban with reason (sends Discord alert)
-- **Delete** — Remove user account
-- **Resend Invite** — Re-send approval email with Discord invite
+- **Overview** — Landing dashboard with quick links and recent activity.
+- **Statistics** — Aggregate guild stats (member counts, forum activity, character refresh status).
 
-### Tab: Applications
+### Group: People
 
-- View pending, approved, and denied applications
-- **Approve** — Activates user, sends approval email with Discord invite
-- **Deny** — Marks application as denied
+- **Member Overrides** — Pin a user's rank so the periodic Discord-role sync ignores them (`rank_locked = 1` on `users`). Gated by `users.manage_overrides`. Also surfaces `users.manage_characters` actions (set main / remove a character on behalf of a member) when the viewer has that permission.
+- **Discord Role Mappings** *(GM only)* — Map Discord server roles → site ranks and RBAC roles. Live role list pulled from the bot.
+- **Permissions** — Create/edit/delete custom RBAC roles, toggle permissions per role, assign roles to users.
 
-### Tab: Forum Management
+### Group: Guild
 
-- **Create Category** — Add new forum categories (name, description, officer-only toggle, sort order)
-- **Reports** — Review reported posts/comments (open, reviewing, resolved, dismissed)
+- **Roster + Federation** — Full guild roster across every child guild (MDGA on Tichondrius/Area 52/Illidan/Sargeras/Moon Guard/etc., plus Make Elwynn Great Again). Filter by class/rank/level, view linked site accounts, ban/unban guild members. Manage which guilds are registered as part of the federation.
+- **Game Rank Mappings** — Per-guild map of in-game guild rank (0–9) → site rank. Used by the addon-sync rank-change handler and by Discord role reconciliation.
+- **Audit Tool** — In-panel launcher for the standalone Excel audit report generator (`tools/mdga-audit/`).
 
-### Tab: Events
+### Group: Moderation
 
-- Create, edit, and delete events
-- Manage recurring event series
+- **Reports** (member activity) — Search and filter users by rank, status, date range, activity period. Long-running reports show a live countdown timer while collating; results stream in when ready. Includes the Guild Gaps view (Discord vs site accounts), Discord Orphans, and Spelling Mismatches subreports. Save/load filter presets.
+- **Forum violations** — Triage reported posts/comments (Open → Reviewing → Resolved / Dismissed).
+- **Recycle Bin** — View and restore soft-deleted forum posts and comments, or purge them permanently. Gated by `admin.manage_recycle_bin`.
+- **Audit Log** — Read-only feed of every admin action (`admin_actions` table). Includes target type/id, summary, and JSON metadata. Forum post-edit revisions (`forum_post_revisions`) are diffable from here. Gated by `admin.view_audit_log`. Account lock/unlock actions also live here via `admin.manage_account_lock`.
 
-### Tab: Carousel
+### Group: Content
 
-- **Upload Images** — Add screenshots/photos to the homepage carousel
-- **Manage Order** — Drag to reorder, edit alt text
-- **Home Background** — Upload or set URL for the hero background image
+- **Events** — Create, edit, delete events. Manage recurring series. Upload recap screenshots to past events.
+- **Images** — Upload/reorder carousel images, edit alt text, set the home hero background.
+- **Applications** — Review pending/approved/denied applications. Approve activates the account and sends an invite email; deny marks it as denied.
+- **Forum Categories** — Create/edit/delete categories. Toggle `officer_only`, `officer_post_only`, and `age_restricted`. Customize per-category icon, color, and accent (overrides the legacy hardcoded map).
 
-### Tab: Reports
+### Reconciliation (entry point varies)
 
-- **Member Activity Report** — Search and filter users by rank, status, date range, activity period. Export results.
-- **Guild Gaps Report** — Compare Discord members vs. site accounts. Identify: needs Discord link, no site account, Discord not active, etc.
-- **Generate Report** — Long-running reports show a live countdown timer while collating server-side; results stream into the table when ready.
-- **Saved Presets** — Save and load report filter configurations
-
-### Tab: Reconciliation
-
-- Cross-references the in-game guild roster (from Blizzard + addon) against Discord membership and site accounts
-- Each row flags its state: linked, needs link, no site account, Discord-only, etc.
+- Cross-references the in-game guild roster against Discord membership and site accounts
 - **Link** — Manually link a guild member row to an existing site user
 - **Ignore** / **Un-ignore** — Mark a row as intentionally unlinked (alt characters, etc.)
 - **Refresh** — Re-runs `discord-member-sync` + `guild-sync` services
-- **Paste Addon JSON** — Officers can paste the addon's "Export JSON" output to backfill officer notes, public notes, and `lastSeen` timestamps onto guild_members rows
-- **Officer Note column** — Surfaces notes captured client-side by the addon
-
-### Tab: Roles (Guild Master Only)
-
-- Create/edit/delete custom RBAC roles
-- Toggle permissions per role
-- Assign roles to specific users
-
-### Tab: Discord Roles (Guild Master Only)
-
-- View all Discord server roles (live from bot)
-- Map Discord roles → site ranks (recruit/member/veteran/officer/guildmaster)
-- Map Discord roles → RBAC roles
+- **Paste Addon JSON** — Paste the addon's "Export JSON" output to backfill officer notes, public notes, and `lastSeen` timestamps. Dedup'd by SHA-256 in `addon_ingests`.
 
 ---
 
@@ -1048,7 +1062,23 @@ Discord OAuth uses random state tokens with 10-minute TTL, stored server-side an
 
 ### Schema
 
-All migrations are in `db/` (schema.sql + migration-001 through migration-041). Run automatically by `setup.sh`.
+All migrations are in `db/` (schema.sql + migration-001 through migration-053). Run automatically by `setup.sh` (idempotent — already-applied migrations are skipped). Notable recent migrations:
+
+| Migration | Adds |
+|-----------|------|
+| 041 | Reconciliation: `discord_members`, `addon_ingests` |
+| 042 | Federation child guilds + `user_characters.guild_id` FK |
+| 043 | `users.rank_locked` — pin a rank against Discord-role sync |
+| 044 | Per-category forum styling (icon/color/accent) |
+| 045 | Per-event screenshot uploads |
+| 046 | `users.manage_overrides` permission |
+| 047 | `forum_categories.age_restricted` |
+| 048 | `admin_actions`, `forum_post_revisions`, account lock cols, soft-delete cols, audit/recycle-bin/account-lock/character-edit permissions |
+| 049 | `users.display_rank` |
+| 050 | `users.last_login_at` (indexed for range scans) |
+| 051 | `forum_categories.officer_post_only` |
+| 052 | `events.prize` |
+| 053 | Recreates `applications` table without the legacy `admin_users` FK |
 
 ### Core Tables
 
@@ -1085,6 +1115,9 @@ All migrations are in `db/` (schema.sql + migration-001 through migration-041). 
 | `user_report_presets` | Saved admin report filter configurations |
 | `discord_members` | Cached Discord guild member list for reconciliation against the in-game roster |
 | `addon_ingests` | SHA-256 ledger of addon JSON pastes (deduplicates re-submissions) |
+| `admin_actions` | Audit log of every admin/officer action (action_type, target, JSON metadata) |
+| `forum_post_revisions` | Pre-edit snapshot of every forum post edit (diff source for audit log) |
+| `event_screenshots` | Per-event recap gallery uploads (WebP via the standard upload pipeline) |
 
 ### Running Migrations Manually
 
@@ -1111,6 +1144,7 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 | PUT | `/api/auth/password` | JWT | Change password |
 | POST | `/api/auth/logout` | JWT | Logout |
 | GET | `/api/auth/me` | JWT | Current user + permissions |
+| POST | `/api/auth/companion-token` | JWT | Short-lived token consumed by the WoW addon for officer-gated calls |
 | POST | `/api/auth/test-email` | Officer | Test SMTP configuration |
 
 ### Config
@@ -1149,7 +1183,7 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 |--------|----------|:----:|-------------|
 | GET | `/api/leaderboard?bracket=solo_shuffle&page=1` | JWT | Rankings for a bracket |
 | POST | `/api/leaderboard/refresh` | JWT | Refresh own character stats |
-| POST | `/api/leaderboard/refresh-all` | leaderboard.bulk_refresh | Guild-wide stat refresh |
+| POST | `/api/leaderboard/refresh-guild` | leaderboard.bulk_refresh | Guild-wide stat refresh |
 
 ### Forum
 
@@ -1157,17 +1191,20 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 |--------|----------|:----:|-------------|
 | GET | `/api/forum/categories` | — | List categories |
 | POST | `/api/forum/categories` | forum.manage_categories | Create category |
+| PUT | `/api/forum/categories/:id` | forum.manage_categories | Update category (incl. icon/color/officer_only/officer_post_only/age_restricted) |
+| DELETE | `/api/forum/categories/:id` | forum.manage_categories | Delete category |
 | GET | `/api/forum/categories/:id/posts` | — | Posts in category (sort: hot/new/top) |
 | GET | `/api/forum/search?q=term` | — | Full-text search |
 | POST | `/api/forum/posts` | JWT | Create post |
 | GET | `/api/forum/posts/:id` | — | Get post + comments + votes |
+| PUT | `/api/forum/posts/:id` | JWT | Edit post (author or moderator; records a `forum_post_revisions` row) |
 | POST | `/api/forum/posts/:id/comments` | JWT | Add comment |
 | POST | `/api/forum/posts/:id/vote` | JWT | Vote (+1/-1/0) |
 | POST | `/api/forum/comments/:id/vote` | JWT | Vote on comment |
 | POST | `/api/forum/posts/:id/report` | JWT | Report post |
 | POST | `/api/forum/comments/:id/report` | JWT | Report comment |
-| DELETE | `/api/forum/posts/:id` | JWT | Delete post |
-| DELETE | `/api/forum/comments/:id` | JWT | Delete comment |
+| DELETE | `/api/forum/posts/:id` | JWT | Soft-delete post (restorable from Recycle Bin) |
+| DELETE | `/api/forum/comments/:id` | JWT | Soft-delete comment |
 | PUT | `/api/forum/posts/:id/pin` | forum.pin_posts | Toggle pin |
 | PUT | `/api/forum/posts/:id/lock` | forum.lock_posts | Toggle lock |
 
@@ -1176,12 +1213,14 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 | Method | Endpoint | Auth | Description |
 |--------|----------|:----:|-------------|
 | GET | `/api/events` | — | List upcoming events |
+| GET | `/api/events/addon-export` | — | Lightweight feed consumed by the WoW addon's event panel |
 | POST | `/api/events` | events.manage | Create event |
 | PUT | `/api/events/:id` | events.manage | Update event |
 | DELETE | `/api/events/:id` | events.manage | Delete event |
 | DELETE | `/api/events/series/:seriesId` | events.manage | Delete future events in series |
 | POST | `/api/events/:id/rsvp` | JWT | RSVP to event |
 | GET | `/api/events/:id/rsvps` | JWT | Get RSVP list |
+| GET | `/api/events/:id/screenshots` | — | Recap gallery for a past event |
 
 ### Applications
 
@@ -1198,6 +1237,7 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 | GET | `/api/users` | admin.manage_users | List all users |
 | GET | `/api/users/banned` | admin.manage_users | List banned users |
 | PUT | `/api/users/:id/rank` | admin.manage_users | Change rank |
+| PUT | `/api/users/:id/rank-lock` | users.manage_overrides | Pin/unpin a user's rank against Discord-role sync |
 | PUT | `/api/users/:id/ban` | admin.manage_users | Ban user |
 | PUT | `/api/users/:id/unban-request` | admin.manage_users | Request unban |
 | DELETE | `/api/users/:id` | admin.manage_users | Delete user |
@@ -1209,6 +1249,16 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 |--------|----------|:----:|-------------|
 | GET | `/api/guild/summary` | JWT | Guild info + activity + achievements |
 | GET | `/api/guild/roster` | guild.view_roster | Full roster with filters |
+| GET | `/api/guild/achievements` | JWT | Guild achievement list |
+| GET | `/api/guild/activity` | JWT | Activity feed (joins, leaves, rank changes) |
+| GET | `/api/guild/guilds` | Officer | List registered federation child guilds |
+| POST | `/api/guild/guilds` | guild.manage | Register a new child guild |
+| DELETE | `/api/guild/guilds/:id` | guild.manage | Unregister a child guild |
+| POST | `/api/guild/sync` | guild.manage | Force a roster + stats sync against Blizzard |
+| GET | `/api/guild/game-rank-mappings/:guildId` | Officer | Per-guild in-game rank → site rank map |
+| PUT | `/api/guild/game-rank-mappings/:guildId` | guild.manage | Update the per-guild rank map |
+| PUT | `/api/guild/members/:id/ban` | admin.manage_users | Ban a guild member by guild_members row id |
+| PUT | `/api/guild/members/:id/unban` | admin.manage_users | Unban a guild member |
 
 ### Roles & Permissions
 
@@ -1248,11 +1298,31 @@ for f in db/migration-*.sql; do mysql -u USER -p DB_NAME < "$f" 2>/dev/null; don
 |--------|----------|:----:|-------------|
 | GET | `/api/reports/users` | admin.view_panel | Member activity report |
 | GET | `/api/reports/guild-gaps` | admin.view_panel | Guild vs Discord gaps |
+| GET | `/api/reports/discord-orphans` | admin.view_panel | Discord members with no site account / no guild character |
+| GET | `/api/reports/spelling-mismatches` | admin.view_panel | Character name vs Discord nickname spelling diff |
 | GET | `/api/reports?status=open` | admin.view_panel | Forum violation reports |
 | PUT | `/api/reports/:id` | admin.view_panel | Update report status |
 | GET | `/api/reports/users/presets` | admin.view_panel | Saved report presets |
 | POST | `/api/reports/users/presets` | admin.view_panel | Save report preset |
 | DELETE | `/api/reports/users/presets/:id` | admin.view_panel | Delete preset |
+
+### Admin
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|:----:|-------------|
+| GET | `/api/admin/stats` | admin.view_panel | Aggregate counts surfaced on the Overview/Statistics tabs |
+| GET | `/api/admin/audit-log` | admin.view_audit_log | Paginated admin action log |
+| GET | `/api/admin/posts/:id/revisions` | admin.view_audit_log | Pre-edit revision history for a post |
+| GET | `/api/admin/recycle-bin` | admin.manage_recycle_bin | Soft-deleted forum content |
+| POST | `/api/admin/recycle-bin/posts/:id/restore` | admin.manage_recycle_bin | Restore a deleted post |
+| POST | `/api/admin/recycle-bin/comments/:id/restore` | admin.manage_recycle_bin | Restore a deleted comment |
+| DELETE | `/api/admin/recycle-bin/posts/:id` | admin.manage_recycle_bin | Permanently purge a deleted post |
+| DELETE | `/api/admin/recycle-bin/comments/:id` | admin.manage_recycle_bin | Permanently purge a deleted comment |
+| POST | `/api/admin/users/:id/lock` | admin.manage_account_lock | Lock an account (timed or indefinite) with a reason |
+| POST | `/api/admin/users/:id/unlock` | admin.manage_account_lock | Clear an account lock |
+| GET | `/api/admin/users/:id/characters` | users.manage_characters | List a member's linked characters |
+| POST | `/api/admin/users/:userId/characters/:charId/main` | users.manage_characters | Set a member's main character |
+| DELETE | `/api/admin/users/:userId/characters/:charId` | users.manage_characters | Remove a character from a member |
 
 ### Addon
 
