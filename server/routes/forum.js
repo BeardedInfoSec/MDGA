@@ -685,12 +685,18 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
   const postPath = slug ? `${postId}-${slug}` : `${postId}`;
-  let firstImage = postMeta?.image_url || null;
+  // Up to 4 images for the winner embed gallery (same trick as kickoff).
+  let postImages = [];
   const [imgRows] = await pool.execute(
-    'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
+    'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 4',
     [postId]
   );
-  if (imgRows.length > 0) firstImage = imgRows[0].image_url;
+  if (imgRows.length > 0) {
+    postImages = imgRows.map((r) => r.image_url);
+  } else if (postMeta?.image_url) {
+    postImages = [postMeta.image_url];
+  }
+  const postUrl = `https://mdga.gg/forum/post/${postPath}`;
 
   let validIdx = 0;
   let dirty = false;
@@ -734,10 +740,10 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
           `**Slot:** ${win.position}`,
           `**Comment:** ${author.content.slice(0, 200)}`,
           ``,
-          `https://mdga.gg/forum/post/${postPath}`,
+          postUrl,
         ].join('\n'),
         0xD4AF37,
-        { imageUrl: firstImage }
+        { imageUrls: postImages, galleryUrl: postUrl }
       );
       if (sent) announced[key] = 1;
     } catch (err) {
@@ -1384,15 +1390,20 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
         'SELECT id, title, image_url FROM forum_posts WHERE id = ?',
         [postId]
       );
-      // Pull the first attached image (multi-image table wins; falls back
-      // to the legacy single image_url field). Discord shows it inline.
-      let firstImage = postRow ? postRow.image_url : null;
+      // Pull up to 4 attached images (Discord renders that many as a
+      // grouped gallery when embeds share a URL). multi-image table wins;
+      // falls back to the legacy single image_url field.
+      let postImages = [];
       if (postRow) {
         const [imgRows] = await pool.execute(
-          'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
+          'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 4',
           [postId]
         );
-        if (imgRows.length > 0) firstImage = imgRows[0].image_url;
+        if (imgRows.length > 0) {
+          postImages = imgRows.map((r) => r.image_url);
+        } else if (postRow.image_url) {
+          postImages = [postRow.image_url];
+        }
       }
       if (postRow) {
         // Build the friendly /forum/post/<id>-<slug> URL the same way the
@@ -1425,16 +1436,17 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
         const slotPhrase = dedupSorted.length === 1
           ? `Comment **#${dedupSorted[0]}** wins.`
           : `Comments at positions **${dedupSorted.join(', ')}** win.`;
+        const postUrl = `https://mdga.gg/forum/post/${postPath}`;
         setImmediate(() => sendDiscordAnnouncement(
           channelId,
           `Giveaway started: ${postRow.title}`,
           [
             `${slotPhrase} ${replyHint}${cooldownNote}`,
             ``,
-            `https://mdga.gg/forum/post/${postPath}`,
+            postUrl,
           ].join('\n'),
           0xD4AF37,
-          { imageUrl: firstImage }
+          { imageUrls: postImages, galleryUrl: postUrl }
         ).catch((err) => console.error('Giveaway kickoff announcement failed:', err.message)));
       }
     }

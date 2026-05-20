@@ -522,6 +522,12 @@ async function setMemberRoles(discordId, addRoleIds, removeRoleIds) {
 // Falls back to OFFICER_CHANNEL_ID when channelId is blank so old configs
 // (no channel persisted) still behave sensibly.
 // ================================================
+function absolutizeImageUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return null;
+  return /^https?:\/\//i.test(u) ? u : `https://mdga.gg${u.startsWith('/') ? '' : '/'}${u}`;
+}
+
 async function sendDiscordAnnouncement(channelId, title, description, color = 0xD4AF37, options = {}) {
   if (!client || !client.isReady()) return false;
   const target = String(channelId || '').trim() || OFFICER_CHANNEL_ID;
@@ -529,23 +535,39 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
   try {
     const channel = await client.channels.fetch(target);
     if (!channel) return false;
-    const embed = new EmbedBuilder()
-      .setTitle(title)
-      .setDescription(description)
-      .setColor(color)
-      .setTimestamp();
-    // Optional image (forum giveaway uses the post's first attached image
-    // so members see the prize in Discord without having to click through).
-    // Path is normalized to an absolute https URL because Discord rejects
-    // bare /uploads/... paths.
-    if (options.imageUrl) {
-      const url = String(options.imageUrl).trim();
-      const absolute = /^https?:\/\//i.test(url)
-        ? url
-        : `https://mdga.gg${url.startsWith('/') ? '' : '/'}${url}`;
-      embed.setImage(absolute);
+
+    // Discord trick for multi-image embeds: multiple embeds sharing the
+    // same URL property render as a single grouped gallery (up to 4
+    // images shown). Callers pass either options.imageUrl (single) or
+    // options.imageUrls (array, max 4 honored).
+    const rawImages = Array.isArray(options.imageUrls) && options.imageUrls.length > 0
+      ? options.imageUrls.slice(0, 4)
+      : (options.imageUrl ? [options.imageUrl] : []);
+    const imageUrls = rawImages.map(absolutizeImageUrl).filter(Boolean);
+
+    if (imageUrls.length === 0) {
+      const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .setColor(color)
+        .setTimestamp();
+      await channel.send({ embeds: [embed] });
+      return true;
     }
-    await channel.send({ embeds: [embed] });
+
+    // Pick a stable gallery URL (the source post if provided, else the
+    // first image URL). Discord groups embeds by URL identity, so this
+    // value must be the same on every embed in the batch.
+    const galleryUrl = options.galleryUrl || imageUrls[0];
+
+    const embeds = imageUrls.map((u, i) => {
+      const e = new EmbedBuilder().setURL(galleryUrl).setColor(color).setImage(u);
+      if (i === 0) {
+        e.setTitle(title).setDescription(description).setTimestamp();
+      }
+      return e;
+    });
+    await channel.send({ embeds });
     return true;
   } catch (err) {
     console.error(`sendDiscordAnnouncement error (channel ${target}):`, err.message);
