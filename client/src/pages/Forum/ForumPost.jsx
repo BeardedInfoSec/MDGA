@@ -11,6 +11,7 @@ import { Alert } from '../../components/ui';
 import MarkdownContent from '../../components/common/MarkdownContent';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
 import MentionSuggest from '../../components/common/MentionSuggest';
+import NumberChipsField from '../../components/common/NumberChipsField';
 import GuildFlag from '../../components/common/GuildFlag';
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
@@ -59,9 +60,9 @@ export default function ForumPost() {
   // Giveaway config modal (officer / forum.manage_giveaway only).
   const [giveawayOpen, setGiveawayOpen] = useState(false);
   const [giveawayConfig, setGiveawayConfig] = useState(null);
-  const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
-  const [giveawayRateMin, setGiveawayRateMin] = useState('5');
-  const [giveawayWarnings, setGiveawayWarnings] = useState('30, 15, 5');
+  const [giveawayPositions, setGiveawayPositions] = useState([1, 100]);
+  const [giveawayRateMin, setGiveawayRateMin] = useState(5);
+  const [giveawayWarnings, setGiveawayWarnings] = useState([30, 15, 5]);
   const [giveawaySaving, setGiveawaySaving] = useState(false);
   const [giveawayError, setGiveawayError] = useState('');
 
@@ -271,13 +272,13 @@ export default function ForumPost() {
         const cfg = data.config;
         setGiveawayConfig(cfg);
         if (cfg) {
-          setGiveawayPositions((cfg.target_positions || []).join(', '));
-          setGiveawayRateMin(String(Math.round((cfg.rate_limit_seconds || 0) / 60)));
-          setGiveawayWarnings((cfg.warning_minutes || []).join(', '));
+          setGiveawayPositions(cfg.target_positions || []);
+          setGiveawayRateMin(Math.round((cfg.rate_limit_seconds || 0) / 60));
+          setGiveawayWarnings(cfg.warning_minutes || []);
         } else {
-          setGiveawayPositions('1, 100');
-          setGiveawayRateMin('5');
-          setGiveawayWarnings('30, 15, 5');
+          setGiveawayPositions([1, 100]);
+          setGiveawayRateMin(5);
+          setGiveawayWarnings([30, 15, 5]);
         }
       }
     } catch {
@@ -289,8 +290,7 @@ export default function ForumPost() {
     setGiveawaySaving(true);
     setGiveawayError('');
     try {
-      const positions = giveawayPositions.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n) && n > 0);
-      if (positions.length === 0) {
+      if (giveawayPositions.length === 0) {
         setGiveawayError('At least one valid position is required.');
         return;
       }
@@ -298,12 +298,9 @@ export default function ForumPost() {
       const res = await apiFetch(`/forum/posts/${post.id}/giveaway`, {
         method: 'PUT',
         body: JSON.stringify({
-          target_positions: positions,
+          target_positions: giveawayPositions,
           rate_limit_seconds: rateSec,
-          warning_minutes: giveawayWarnings
-            .split(',')
-            .map((s) => parseInt(s.trim(), 10))
-            .filter((n) => Number.isInteger(n) && n > 0 && n <= 1440),
+          warning_minutes: giveawayWarnings,
         }),
       });
       if (!res.ok) {
@@ -1015,42 +1012,74 @@ export default function ForumPost() {
               <p style={{ color: 'var(--color-text-secondary)', fontSize: 13, marginTop: 0 }}>
                 Comments matching the pattern below are counted in chronological order. Whoever lands on a target position wins; the bot announces in the officer channel.
               </p>
-              <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Target positions (comma-separated)</span>
-                <input
-                  type="text"
+              <div style={{ marginBottom: 14 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Winning positions</span>
+                <NumberChipsField
                   value={giveawayPositions}
-                  onChange={(e) => setGiveawayPositions(e.target.value)}
-                  placeholder="1, 100"
-                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                  onChange={setGiveawayPositions}
+                  presets={[
+                    { label: 'First only', values: [1] },
+                    { label: '1st + 100th', values: [1, 100] },
+                    { label: 'Top 3 (1, 2, 3)', values: [1, 2, 3] },
+                  ]}
+                  placeholder="e.g. 100"
                 />
-              </label>
-              <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = disabled)</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="60"
-                  value={giveawayRateMin}
-                  onChange={(e) => setGiveawayRateMin(e.target.value)}
-                  style={{ width: 120, padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
-                />
-              </label>
-              <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
-                  Drop hint warnings (minutes before publish, comma-separated)
-                </span>
-                <input
-                  type="text"
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Per-user cooldown</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {[
+                    { label: 'None', value: 0 },
+                    { label: '1 min', value: 1 },
+                    { label: '5 min', value: 5 },
+                    { label: '15 min', value: 15 },
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setGiveawayRateMin(p.value)}
+                      style={{
+                        background: Number(giveawayRateMin) === p.value ? 'rgba(212, 175, 55, 0.18)' : 'transparent',
+                        color: Number(giveawayRateMin) === p.value ? 'var(--color-gold)' : 'var(--color-text-secondary)',
+                        border: `1px solid ${Number(giveawayRateMin) === p.value ? 'var(--color-gold)' : 'var(--color-gray-700)'}`,
+                        borderRadius: 'var(--border-radius-sm)',
+                        padding: '4px 12px',
+                        fontFamily: 'var(--font-ui)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >{p.label}</button>
+                  ))}
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    value={giveawayRateMin}
+                    onChange={(e) => setGiveawayRateMin(e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
+                    style={{ width: 110, padding: '6px 10px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 13 }}
+                    placeholder="custom min"
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Drop hint warnings</span>
+                <NumberChipsField
                   value={giveawayWarnings}
-                  onChange={(e) => setGiveawayWarnings(e.target.value)}
-                  placeholder="30, 15, 5"
-                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                  onChange={setGiveawayWarnings}
+                  unit="min before"
+                  maxValue={1440}
+                  presets={[
+                    { label: 'None', values: [] },
+                    { label: '30 / 15 / 5', values: [30, 15, 5] },
+                    { label: '10 / 5 / 1', values: [10, 5, 1] },
+                  ]}
+                  placeholder="e.g. 30"
                 />
-                <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-                  Only fires for scheduled posts (with a future publish time). The bot pings Discord N minutes before the drop.
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 6 }}>
+                  Only fires for scheduled posts. Each chip is a "minutes before drop" ping.
                 </span>
-              </label>
+              </div>
               <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
                 Reply pattern (<code>MDGA!</code> / <code>MEGA!</code>) and the Discord announcement channel are fixed sitewide.
               </p>

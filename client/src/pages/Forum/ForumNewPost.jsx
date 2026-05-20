@@ -5,6 +5,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { Alert } from '../../components/ui';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
 import MentionSuggest from '../../components/common/MentionSuggest';
+import NumberChipsField from '../../components/common/NumberChipsField';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 import { postUrlFromParts } from '../../utils/forumUrls';
@@ -44,9 +45,9 @@ export default function ForumNewPost() {
   // the form does a second PUT to /forum/posts/:id/giveaway right after
   // the create succeeds — same fields the post-detail modal exposes.
   const [giveawayEnabled, setGiveawayEnabled] = useState(false);
-  const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
-  const [giveawayRateMin, setGiveawayRateMin] = useState('5');
-  const [giveawayWarnings, setGiveawayWarnings] = useState('30, 15, 5');
+  const [giveawayPositions, setGiveawayPositions] = useState([1, 100]);
+  const [giveawayRateMin, setGiveawayRateMin] = useState(5);
+  const [giveawayWarnings, setGiveawayWarnings] = useState([30, 15, 5]);
 
   useDocumentTitle(category ? `New post in ${category.name} | MDGA` : 'New Post | MDGA');
 
@@ -155,26 +156,18 @@ export default function ForumNewPost() {
       // doesn't roll back the post — we just surface the error so they
       // can retry from the post detail page's Giveaway button.
       if (giveawayEnabled && hasPermission('forum.manage_giveaway')) {
-        const positions = giveawayPositions
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => Number.isInteger(n) && n > 0);
-        if (positions.length === 0) {
+        if (giveawayPositions.length === 0) {
           setError('Giveaway needs at least one valid position. Post was created — open it and configure the giveaway from the toolbar.');
           navigate(postUrlFromParts(data.id, title.trim()));
           return;
         }
         const rateSec = Math.max(0, Math.min(60, parseInt(giveawayRateMin, 10) || 0)) * 60;
-        const warningMinutes = giveawayWarnings
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => Number.isInteger(n) && n > 0 && n <= 1440);
         const gRes = await apiFetch(`/forum/posts/${data.id}/giveaway`, {
           method: 'PUT',
           body: JSON.stringify({
-            target_positions: positions,
+            target_positions: giveawayPositions,
             rate_limit_seconds: rateSec,
-            warning_minutes: warningMinutes,
+            warning_minutes: giveawayWarnings,
           }),
         });
         if (!gRes.ok) {
@@ -401,43 +394,75 @@ export default function ForumNewPost() {
                   </label>
                   {giveawayEnabled && (
                     <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(212, 175, 55, 0.25)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <label>
-                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Target positions (comma-separated)</span>
-                        <input
-                          type="text"
+                      <div>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Winning positions</span>
+                        <NumberChipsField
                           value={giveawayPositions}
-                          onChange={(e) => setGiveawayPositions(e.target.value)}
-                          placeholder="1, 100"
-                          className={styles.composeTextInput}
+                          onChange={setGiveawayPositions}
+                          presets={[
+                            { label: 'First only', values: [1] },
+                            { label: '1st + 100th', values: [1, 100] },
+                            { label: 'Top 3 (1, 2, 3)', values: [1, 2, 3] },
+                          ]}
+                          placeholder="e.g. 100"
                         />
-                      </label>
-                      <label>
-                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = none)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="60"
-                          value={giveawayRateMin}
-                          onChange={(e) => setGiveawayRateMin(e.target.value)}
-                          className={styles.composeTextInput}
-                          style={{ width: 120 }}
-                        />
-                      </label>
-                      <label>
-                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
-                          Drop hint warnings (minutes before publish, comma-separated)
-                        </span>
-                        <input
-                          type="text"
+                      </div>
+                      <div>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Per-user cooldown</span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {[
+                            { label: 'None', value: 0 },
+                            { label: '1 min', value: 1 },
+                            { label: '5 min', value: 5 },
+                            { label: '15 min', value: 15 },
+                          ].map((p) => (
+                            <button
+                              key={p.label}
+                              type="button"
+                              onClick={() => setGiveawayRateMin(p.value)}
+                              style={{
+                                background: Number(giveawayRateMin) === p.value ? 'rgba(212, 175, 55, 0.18)' : 'transparent',
+                                color: Number(giveawayRateMin) === p.value ? 'var(--color-gold)' : 'var(--color-text-secondary)',
+                                border: `1px solid ${Number(giveawayRateMin) === p.value ? 'var(--color-gold)' : 'var(--color-gray-700)'}`,
+                                borderRadius: 'var(--border-radius-sm)',
+                                padding: '4px 12px',
+                                fontFamily: 'var(--font-ui)',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >{p.label}</button>
+                          ))}
+                          <input
+                            type="number"
+                            min="0"
+                            max="60"
+                            value={giveawayRateMin}
+                            onChange={(e) => setGiveawayRateMin(e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
+                            className={styles.composeTextInput}
+                            style={{ width: 110 }}
+                            placeholder="custom min"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 6 }}>Drop hint warnings</span>
+                        <NumberChipsField
                           value={giveawayWarnings}
-                          onChange={(e) => setGiveawayWarnings(e.target.value)}
-                          placeholder="30, 15, 5"
-                          className={styles.composeTextInput}
+                          onChange={setGiveawayWarnings}
+                          unit="min before"
+                          maxValue={1440}
+                          presets={[
+                            { label: 'None', values: [] },
+                            { label: '30 / 15 / 5', values: [30, 15, 5] },
+                            { label: '10 / 5 / 1', values: [10, 5, 1] },
+                          ]}
+                          placeholder="e.g. 30"
                         />
-                        <span className={styles.composeUploadHint}>
-                          Only fires if you also set a scheduled publish time above. Example: "30, 15, 5" → the bot pings Discord 30 / 15 / 5 minutes before the drop.
+                        <span className={styles.composeUploadHint} style={{ marginTop: 6, display: 'block' }}>
+                          Only fires when you also set a scheduled publish time above. Each chip is a "minutes before drop" ping.
                         </span>
-                      </label>
+                      </div>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary)' }}>
                         Reply pattern (<code>MDGA!</code> / <code>MEGA!</code>) and the Discord announcement channel are fixed sitewide.
                       </p>
