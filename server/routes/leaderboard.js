@@ -117,6 +117,7 @@ router.get('/', optionalAuth, async (req, res) => {
       `SELECT * FROM (
          SELECT gm.id, gm.character_name, gm.realm_slug, gm.class, gm.race, gm.level,
                gm.guild_rank, gm.spec,
+               gm.guild_id, g.faction AS guild_faction,
                gms.arena_2v2, gms.arena_3v3, gms.solo_shuffle, gms.rbg_rating,
                gms.honorable_kills, gms.killing_blows,
                gms.arenas_played, gms.arenas_won, gms.arenas_lost,
@@ -162,6 +163,7 @@ router.get('/', optionalAuth, async (req, res) => {
     // the user is on page 2+, filtering, or has sorted by a non-rank column.
     const [leaderRows] = await pool.execute(
       `SELECT gm.character_name, gm.realm_slug, gm.class, gm.spec,
+              gm.guild_id, g.faction AS guild_faction,
               gms.${bracket} AS value,
               u.id AS user_id, u.display_name, u.username, u.discord_username, u.avatar_url
        FROM guild_members gm

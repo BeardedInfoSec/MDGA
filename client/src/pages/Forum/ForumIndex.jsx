@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
 import { authorDisplayName, authorProfileLink, isFormerMember } from '../../utils/forumAuthor';
+import GuildFlag from '../../components/common/GuildFlag';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 import { postUrl } from '../../utils/forumUrls';
@@ -215,6 +216,7 @@ export default function ForumIndex() {
                         </div>
                         <div className={styles.forumPostMeta}>
                           {!isFormerMember(r) && <span className={`rank-badge rank-badge--${r.rank}`}>{r.display_rank || r.rank}</span>}
+                          {!isFormerMember(r) && <GuildFlag row={r} accessor="main" />}
                           {authorProfileLink(r) ? (
                             <span
                               className={styles.profileLink}

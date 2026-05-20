@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { BRACKET_LABELS, FORMAT_NUMBER, SECTIONS } from '../../data/leaderboardData';
 import { armoryUrl } from '../../utils/helpers';
+import GuildFlag from '../../components/common/GuildFlag';
 import styles from './Leaderboards.module.css';
 
 const PAGE_SIZES = [20, 50, 100];
@@ -405,6 +406,8 @@ export default function Leaderboards() {
                           >
                             <td className={styles.rank}>{entry.leaderboard_rank}</td>
                             <td>
+                              <GuildFlag row={entry} />
+                              {' '}
                               <span className={styles.charLink}>{entry.character_name}</span>
                               {entry.realm_slug ? (
                                 <span className={styles.realmMeta}>

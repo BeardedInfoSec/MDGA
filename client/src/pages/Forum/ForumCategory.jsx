@@ -5,6 +5,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
 import { authorDisplayName, authorProfileLink, isFormerMember } from '../../utils/forumAuthor';
 import AgeGate from '../../components/common/AgeGate';
+import GuildFlag from '../../components/common/GuildFlag';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 import { postUrl } from '../../utils/forumUrls';
@@ -237,6 +238,7 @@ export default function ForumCategory() {
                     </div>
                     <div className={styles.forumPostMeta}>
                       {!authorIsFormer && <span className={`rank-badge rank-badge--${post.rank}`}>{post.display_rank || post.rank}</span>}
+                      {!authorIsFormer && <GuildFlag row={post} accessor="main" />}
                       {profileLink ? (
                         <span
                           className={styles.profileLink}

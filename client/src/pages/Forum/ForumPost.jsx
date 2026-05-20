@@ -11,6 +11,7 @@ import { Alert } from '../../components/ui';
 import MarkdownContent from '../../components/common/MarkdownContent';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
 import MentionSuggest from '../../components/common/MentionSuggest';
+import GuildFlag from '../../components/common/GuildFlag';
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
@@ -472,6 +473,7 @@ export default function ForumPost() {
               <div className={styles.postAuthorInfo}>
                 <div className={styles.postAuthorRow}>
                   {!authorIsFormer && <span className={`rank-badge rank-badge--${post.rank}`}>{post.display_rank || post.rank}</span>}
+                  {!authorIsFormer && <GuildFlag row={post} accessor="main" />}
                   {profileLink ? (
                     <Link to={profileLink} className={styles.postAuthorName}>{displayName}</Link>
                   ) : (
@@ -635,6 +637,7 @@ export default function ForumPost() {
                       <div className={styles.commentBody}>
                         <div className={styles.commentMeta}>
                           {!cIsFormer && <span className={`rank-badge rank-badge--${c.rank}`}>{c.display_rank || c.rank}</span>}
+                          {!cIsFormer && <GuildFlag row={c} accessor="main" />}
                           {cProfileLink ? (
                             <Link to={cProfileLink} className={styles.postAuthorName}>{cName}</Link>
                           ) : (

@@ -1,0 +1,30 @@
+.flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+  border: 1px solid transparent;
+}
+
+.flag--horde {
+  background: rgba(185, 28, 28, 0.18);
+  color: var(--color-red-light, #ef4444);
+  border-color: rgba(185, 28, 28, 0.55);
+}
+
+.flag--alliance {
+  background: rgba(37, 99, 235, 0.2);
+  color: #93c5fd;
+  border-color: rgba(37, 99, 235, 0.6);
+}

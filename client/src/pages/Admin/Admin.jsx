@@ -14,6 +14,7 @@ import RecycleBinAdmin from './sections/RecycleBinAdmin';
 import AdminStats from './sections/AdminStats';
 import styles from './Admin.module.css';
 import { postUrlFromParts } from '../../utils/forumUrls';
+import GuildFlag from '../../components/common/GuildFlag';
 
 const RANK_ORDER = ['recruit', 'member', 'veteran', 'officer', 'guildmaster'];
 const CATEGORY_OPTIONS = [
@@ -2603,6 +2604,8 @@ export default function Admin() {
                       return (
                         <tr key={row.guild_member_id}>
                           <td>
+                            <GuildFlag row={row} />
+                            {' '}
                             <strong>{row.character_name}</strong>
                             <div className={styles.userReportSub}>Lvl {row.level || 0}</div>
                           </td>

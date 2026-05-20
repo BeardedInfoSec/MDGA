@@ -781,6 +781,7 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
       `SELECT
           gm.id AS guild_member_id,
           gm.guild_id,
+          g.faction AS guild_faction,
           g.name AS guild_name,
           gm.character_name,
           gm.realm_slug,

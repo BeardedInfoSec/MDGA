@@ -5,6 +5,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo, armoryUrl, formatNumber } from '../../utils/helpers';
 import { getTimezoneOptions } from '../../utils/timezone';
 import { primaryName, secondaryName } from '../../utils/userDisplay';
+import GuildFlag from '../../components/common/GuildFlag';
 import styles from './Profile.module.css';
 
 const WOW_CLASS_COLORS = {
@@ -546,6 +547,7 @@ export default function Profile() {
                       <div className={styles.charBody}>
                         <div className={styles.charTop}>
                           <div className={styles.charName}>{char.character_name}</div>
+                          <GuildFlag row={char} />
                           {char.is_main ? <span className={styles.charMainBadge}>MAIN</span> : <span className={styles.charAltBadge}>ALT</span>}
                         </div>
                         <div className={styles.charRealm}>

@@ -125,6 +125,8 @@ router.get('/search', async (req, res) => {
         u.username, u.display_name, u.\`rank\`, u.display_rank, u.character_name,
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
+        gm_main.guild_id AS main_guild_id,
+        g_main.faction AS main_guild_faction,
         fc_cat.name AS category_name,
         (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
@@ -137,6 +139,8 @@ router.get('/search', async (req, res) => {
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+      LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+      LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN forum_comments fc_match ON fc_match.post_id = fp.id AND fc_match.content LIKE ?
       LEFT JOIN (
@@ -302,6 +306,8 @@ router.get('/categories/:id/posts', async (req, res) => {
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
+        gm_main.guild_id AS main_guild_id,
+        g_main.faction AS main_guild_faction,
         uc_main.realm_slug AS main_realm_slug,
         (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
@@ -323,6 +329,8 @@ router.get('/categories/:id/posts', async (req, res) => {
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+      LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+      LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       LEFT JOIN (
         SELECT post_id,
           SUM(vote) AS net_votes,
@@ -445,6 +453,8 @@ router.get('/posts/:id', async (req, res) => {
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
+        gm_main.guild_id AS main_guild_id,
+        g_main.faction AS main_guild_faction,
         uc_main.realm_slug AS main_realm_slug,
         fc_cat.officer_only, fc_cat.age_restricted AS category_age_restricted,
         fc_cat.name AS category_name,
@@ -455,6 +465,8 @@ router.get('/posts/:id', async (req, res) => {
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+      LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+      LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN (
         SELECT post_id,
@@ -508,6 +520,8 @@ router.get('/posts/:id', async (req, res) => {
       SELECT fc.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
+        gm_main.guild_id AS main_guild_id,
+        g_main.faction AS main_guild_faction,
         uc_main.realm_slug AS main_realm_slug,
         COALESCE(comment_vote_sum.net_votes, 0) AS net_votes,
         COALESCE(comment_vote_sum.upvotes, 0) AS upvotes,
@@ -517,6 +531,8 @@ router.get('/posts/:id', async (req, res) => {
       FROM forum_comments fc
       JOIN users u ON fc.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+      LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+      LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       LEFT JOIN (
         SELECT comment_id,
           SUM(vote) AS net_votes,

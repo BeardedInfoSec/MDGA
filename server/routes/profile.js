@@ -44,9 +44,12 @@ router.get('/:id', requireAuth, async (req, res) => {
              ps.killing_blows, ps.arenas_played, ps.arenas_won, ps.arenas_lost,
              ps.bgs_played, ps.bgs_won,
              ps.total_deaths, ps.creatures_killed, ps.dungeons_entered, ps.raids_entered,
-             ps.quests_completed, ps.achievement_points, ps.fetched_at
+             ps.quests_completed, ps.achievement_points, ps.fetched_at,
+             gm.guild_id, g.faction AS guild_faction
        FROM user_characters uc
        LEFT JOIN pvp_stats ps ON ps.character_id = uc.id
+       LEFT JOIN guild_members gm ON gm.linked_character_id = uc.id
+       LEFT JOIN guilds g ON g.id = gm.guild_id
        WHERE uc.user_id = ?
        ORDER BY uc.is_main DESC, uc.character_name ASC`,
       [req.params.id]
