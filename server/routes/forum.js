@@ -51,7 +51,8 @@ function hasOfficerCategoryAccess(user) {
 // fixed for every drop now, so officers configure positions + cooldown
 // only. Change here to flip every future giveaway in one edit.
 const GIVEAWAY_VALID_PATTERN = '^(MDGA|MEGA)!$';
-const GIVEAWAY_CHANNEL_ID = '1483266989647724758';
+// TEST CHANNEL — flip back to 1483266989647724758 (Events) for real drops.
+const GIVEAWAY_CHANNEL_ID = '1504276476634071102';
 
 // Scheduled-publish gating (rapazzini forum #39). A non-officer viewer must
 // not see a post whose publish_at is still in the future; officers can,
@@ -61,7 +62,19 @@ function canSeeScheduled(user) {
   if (['officer', 'guildmaster'].includes(user.rank)) return true;
   return Array.isArray(user.permissions) && user.permissions.includes('forum.schedule_posts');
 }
-const PUBLISH_FILTER_SQL = '(fp.publish_at IS NULL OR fp.publish_at <= NOW())';
+// A post is "publicly visible" when its publish_at is null, has passed,
+// OR (for giveaway-enabled posts) at least one warning ping has fired.
+// The warning lift lets members read the post once the bot starts hyping
+// the drop, even though replies are still gated by publish_at.
+const PUBLISH_FILTER_SQL = `(
+  fp.publish_at IS NULL
+  OR fp.publish_at <= NOW()
+  OR EXISTS (
+    SELECT 1 FROM giveaway_configs gc_vis
+    WHERE gc_vis.post_id = fp.id
+      AND JSON_LENGTH(COALESCE(gc_vis.warnings_sent, JSON_OBJECT())) > 0
+  )
+)`;
 
 // GET /api/forum/categories
 router.get('/categories', async (req, res) => {
@@ -491,11 +504,19 @@ router.get('/posts/:id', async (req, res) => {
     if (postRows[0].officer_only && !hasOfficerCategoryAccess(viewer)) {
       return res.status(403).json({ error: 'You do not have access to this post' });
     }
-    // Scheduled-publish gate: hide future-dated posts from non-officers.
-    // Officers see them with publish_at set so the frontend can render a
-    // "Scheduled for…" banner.
+    // Scheduled-publish gate: hide future-dated posts from non-officers
+    // UNLESS a drop-warning has already fired (members get sneak-peek
+    // read access during the hype window; comments still locked until
+    // publish_at — enforced in POST /comments).
     if (postRows[0].publish_at && new Date(postRows[0].publish_at) > new Date() && !canSeeScheduled(viewer)) {
-      return res.status(404).json({ error: 'Post not found' });
+      const [[warned]] = await pool.execute(
+        `SELECT JSON_LENGTH(COALESCE(warnings_sent, JSON_OBJECT())) AS n
+         FROM giveaway_configs WHERE post_id = ?`,
+        [postId]
+      );
+      if (!warned || !warned.n || Number(warned.n) === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
     }
 
     // Track view per (post, user) so we can compute unread state on the
@@ -579,7 +600,7 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
     const postId = parsePostId(req.params.id);
     if (!postId) return res.status(404).json({ error: 'Post not found' });
     const [postRows] = await pool.execute(`
-      SELECT fp.locked, fc.officer_only
+      SELECT fp.locked, fp.publish_at, fc.officer_only
       FROM forum_posts fp
       JOIN forum_categories fc ON fc.id = fp.category_id
       WHERE fp.id = ?
@@ -589,6 +610,16 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'You do not have access to this post' });
     }
     if (postRows[0].locked) return res.status(403).json({ error: 'This post is locked' });
+    // Replies blocked until publish_at lands, even when the post is
+    // previewable during a drop-warning window. Officers / schedulers
+    // can still post (they can see the post normally).
+    if (postRows[0].publish_at && new Date(postRows[0].publish_at).getTime() > Date.now() && !canSeeScheduled(req.user)) {
+      const dropAt = new Date(postRows[0].publish_at);
+      return res.status(403).json({
+        error: `Replies are locked until the drop. Comments open at ${dropAt.toLocaleString()}.`,
+        dropAt: dropAt.toISOString(),
+      });
+    }
 
     const { content, imageUrl } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
