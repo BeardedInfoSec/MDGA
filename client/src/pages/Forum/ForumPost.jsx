@@ -14,6 +14,7 @@ import MentionSuggest from '../../components/common/MentionSuggest';
 import NumberChipsField from '../../components/common/NumberChipsField';
 import GuildFlag from '../../components/common/GuildFlag';
 import { getTimezoneOptions } from '../../utils/timezone';
+import DropCountdown from '../../components/common/DropCountdown';
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
@@ -560,6 +561,18 @@ export default function ForumPost() {
         <main className={styles.forumContent}>
           {post.category_id && (
             <Link to={`/forum/category/${post.category_id}`} className={styles.forumBackLink}>← Back to category</Link>
+          )}
+
+          {/* Live countdown for scheduled posts (mostly giveaways during
+              the drop-warning preview window). Refetches the post once
+              the timer hits zero so the live version replaces the
+              preview without a manual reload. */}
+          {post.publish_at && new Date(post.publish_at).getTime() > Date.now() && (
+            <DropCountdown
+              targetIso={post.publish_at}
+              label="Drop incoming"
+              onElapsed={loadPost}
+            />
           )}
 
           {/* Post card */}
