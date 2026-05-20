@@ -5,6 +5,7 @@
   min-width: 22px;
   height: 18px;
   padding: 0 6px;
+  margin-right: var(--space-3);
   border-radius: 3px;
   font-family: var(--font-ui);
   font-size: 10px;
