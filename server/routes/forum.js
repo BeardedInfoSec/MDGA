@@ -4,6 +4,7 @@ const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
 const { logAdminAction } = require('../services/audit-log');
 const { sendOfficerAlert, sendDiscordAnnouncement } = require('../bot');
+const { DateTime } = require('luxon');
 
 const router = express.Router();
 
@@ -398,16 +399,31 @@ router.post('/posts', requireAuth, async (req, res) => {
 
     // Optional scheduled publish (rapazzini forum #39). Only officers /
     // forum.schedule_posts may push a future date; regular members get NULL.
+    //
+    // publishTimezone (optional): interprets publishAt as wall-clock time
+    // in that IANA zone, so "8:30 PM" in America/New_York is preserved
+    // regardless of server or viewer browser zone. Without it we fall
+    // back to JS Date parsing (browser-local).
     let publishAtValue = null;
     if (publishAt) {
-      const parsed = new Date(publishAt);
-      if (Number.isNaN(parsed.getTime())) {
-        return res.status(400).json({ error: 'Invalid publishAt timestamp' });
+      let parsedMs;
+      const tz = (req.body.publishTimezone || '').trim();
+      if (tz) {
+        const dt = DateTime.fromISO(String(publishAt).trim(), { zone: tz });
+        if (!dt.isValid) return res.status(400).json({ error: 'Invalid publishAt / publishTimezone' });
+        parsedMs = dt.toMillis();
+        publishAtValue = dt.toUTC().toFormat('yyyy-MM-dd HH:mm:ss');
+      } else {
+        const parsed = new Date(publishAt);
+        if (Number.isNaN(parsed.getTime())) {
+          return res.status(400).json({ error: 'Invalid publishAt timestamp' });
+        }
+        parsedMs = parsed.getTime();
+        publishAtValue = parsed.toISOString().slice(0, 19).replace('T', ' ');
       }
-      if (parsed.getTime() > Date.now() && !canSeeScheduled(req.user)) {
+      if (parsedMs > Date.now() && !canSeeScheduled(req.user)) {
         return res.status(403).json({ error: 'Only officers can schedule posts for the future' });
       }
-      publishAtValue = parsed.toISOString().slice(0, 19).replace('T', ' ');
     }
 
     // Check category-level posting restrictions:
@@ -621,10 +637,9 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
         [postId]
       );
       if (hasGiveaway || !canSeeScheduled(req.user)) {
-        const dropAt = new Date(postRows[0].publish_at);
         return res.status(403).json({
-          error: `Replies are locked until the drop. Comments open at ${dropAt.toLocaleString()}.`,
-          dropAt: dropAt.toISOString(),
+          error: 'Replies are locked until the drop.',
+          dropAt: new Date(postRows[0].publish_at).toISOString(),
         });
       }
     }

@@ -6,6 +6,7 @@ import { Alert } from '../../components/ui';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
 import MentionSuggest from '../../components/common/MentionSuggest';
 import NumberChipsField from '../../components/common/NumberChipsField';
+import { getTimezoneOptions } from '../../utils/timezone';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 import { postUrlFromParts } from '../../utils/forumUrls';
@@ -41,6 +42,12 @@ export default function ForumNewPost() {
   // Optional scheduled publish (forum #39). Officers only. Empty string =
   // publish immediately; a future datetime hides the post until then.
   const [publishAt, setPublishAt] = useState('');
+  // Browser-local TZ as the default so the picker matches the user's
+  // most likely intent without forcing them to scroll the dropdown.
+  const [publishTz, setPublishTz] = useState(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; }
+    catch { return 'America/New_York'; }
+  });
   // Inline giveaway config (forum.manage_giveaway only). When enabled,
   // the form does a second PUT to /forum/posts/:id/giveaway right after
   // the create succeeds — same fields the post-detail modal exposes.
@@ -134,6 +141,12 @@ export default function ForumNewPost() {
         setSubmitting(false);
         return;
       }
+      // Server interprets publishAt as a local wall-clock string when
+      // publishTimezone is sent alongside (so 8:30 PM stays 8:30 PM in
+      // the picked zone, no browser-TZ drift). Pass the raw datetime-
+      // local value, not toISOString — the latter forces UTC and loses
+      // the wall-clock intent.
+      const canSchedule = publishAt && (isOfficer() || hasPermission('forum.schedule_posts'));
       const res = await apiFetch('/forum/posts', {
         method: 'POST',
         body: JSON.stringify({
@@ -142,7 +155,8 @@ export default function ForumNewPost() {
           content: content.trim(),
           imageUrl,
           imageUrls,
-          publishAt: publishAt && isOfficer() ? new Date(publishAt).toISOString() : undefined,
+          publishAt: canSchedule ? publishAt : undefined,
+          publishTimezone: canSchedule ? publishTz : undefined,
         }),
       });
       if (!res.ok) {
@@ -342,22 +356,36 @@ export default function ForumNewPost() {
               {/* Officer-only: schedule the post for a future time. Leaving
                   blank publishes immediately. */}
               {(isOfficer() || hasPermission('forum.schedule_posts')) && (
-                <label className={styles.composeField}>
+                <div className={styles.composeField}>
                   <span className={styles.composeLabel}>
                     Schedule publish <span className={styles.composeOptional}>(optional)</span>
                   </span>
-                  <input
-                    type="datetime-local"
-                    value={publishAt}
-                    onChange={(e) => setPublishAt(e.target.value)}
-                    className={styles.composeTextInput}
-                  />
-                  {publishAt && new Date(publishAt) > new Date() && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <input
+                      type="datetime-local"
+                      value={publishAt}
+                      onChange={(e) => setPublishAt(e.target.value)}
+                      className={styles.composeTextInput}
+                      style={{ flex: '1 1 220px' }}
+                    />
+                    <select
+                      value={publishTz}
+                      onChange={(e) => setPublishTz(e.target.value)}
+                      className={styles.composeTextInput}
+                      style={{ flex: '1 1 220px' }}
+                      aria-label="Timezone for scheduled publish"
+                    >
+                      {getTimezoneOptions().map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {publishAt && (
                     <span className={styles.composeUploadHint}>
-                      Will be hidden from members until {new Date(publishAt).toLocaleString()}.
+                      Drop time will be locked to {publishTz}, regardless of who's viewing.
                     </span>
                   )}
-                </label>
+                </div>
               )}
 
               {/* Inline giveaway config (officers / forum.manage_giveaway).
