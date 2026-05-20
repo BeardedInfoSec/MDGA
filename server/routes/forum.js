@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
 const { logAdminAction } = require('../services/audit-log');
+const { sendOfficerAlert } = require('../bot');
 
 const router = express.Router();
 
@@ -52,7 +53,7 @@ function hasOfficerCategoryAccess(user) {
 function canSeeScheduled(user) {
   if (!user) return false;
   if (['officer', 'guildmaster'].includes(user.rank)) return true;
-  return Array.isArray(user.permissions) && user.permissions.includes('forum.manage_posts');
+  return Array.isArray(user.permissions) && user.permissions.includes('forum.schedule_posts');
 }
 const PUBLISH_FILTER_SQL = '(fp.publish_at IS NULL OR fp.publish_at <= NOW())';
 
@@ -377,7 +378,7 @@ router.post('/posts', requireAuth, async (req, res) => {
     }
 
     // Optional scheduled publish (rapazzini forum #39). Only officers /
-    // forum.manage_posts may push a future date; regular members get NULL.
+    // forum.schedule_posts may push a future date; regular members get NULL.
     let publishAtValue = null;
     if (publishAt) {
       const parsed = new Date(publishAt);
@@ -586,16 +587,144 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
     const { content, imageUrl } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
 
+    // Check for an active giveaway config on this post. If one exists, we
+    // (1) enforce the per-user rate limit before the INSERT, and (2) after
+    // the INSERT, see whether this comment hits a winner slot.
+    const [giveawayRows] = await pool.execute(
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, winners, announced FROM giveaway_configs WHERE post_id = ?',
+      [postId]
+    );
+    const giveaway = giveawayRows[0] || null;
+
+    if (giveaway && giveaway.rate_limit_seconds > 0) {
+      const [[recent]] = await pool.execute(
+        `SELECT created_at FROM forum_comments
+         WHERE post_id = ? AND user_id = ? AND deleted_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [postId, req.user.id]
+      );
+      if (recent) {
+        const elapsed = (Date.now() - new Date(recent.created_at).getTime()) / 1000;
+        if (elapsed < giveaway.rate_limit_seconds) {
+          const wait = Math.ceil(giveaway.rate_limit_seconds - elapsed);
+          return res.status(429).json({
+            error: `This giveaway limits replies to once every ${giveaway.rate_limit_seconds} seconds. Try again in ${wait}s.`,
+            retryAfter: wait,
+          });
+        }
+      }
+    }
+
     const [result] = await pool.execute(
       'INSERT INTO forum_comments (post_id, user_id, content, image_url) VALUES (?, ?, ?, ?)',
       [postId, req.user.id, content, imageUrl || null]
     );
-    res.status(201).json({ id: result.insertId, message: 'Comment added' });
+    const newCommentId = result.insertId;
+
+    // Giveaway winner detection runs out-of-band so the user's POST stays
+    // snappy even when a Discord round-trip is involved.
+    if (giveaway) {
+      setImmediate(() => checkGiveawayWinner(postId, newCommentId, giveaway, req.user).catch((err) =>
+        console.error('Giveaway winner check failed:', err)
+      ));
+    }
+
+    res.status(201).json({ id: newCommentId, message: 'Comment added' });
   } catch (err) {
     console.error('Create comment error:', err);
     res.status(500).json({ error: 'Failed to add comment' });
   }
 });
+
+// Background: after a comment lands on a giveaway-enabled post, walk the
+// comment list, identify which valid comments occupy target positions,
+// persist any newly-filled slot, and ping the officer channel once per
+// slot (announced map prevents double-fire across restarts).
+async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
+  let pattern;
+  try {
+    pattern = new RegExp(giveaway.valid_pattern);
+  } catch (err) {
+    console.warn(`Giveaway regex invalid for post ${postId}: ${giveaway.valid_pattern}`);
+    return;
+  }
+  const targets = typeof giveaway.target_positions === 'string'
+    ? JSON.parse(giveaway.target_positions) : giveaway.target_positions;
+  const winners = typeof giveaway.winners === 'string'
+    ? JSON.parse(giveaway.winners) : (giveaway.winners || {});
+  const announced = typeof giveaway.announced === 'string'
+    ? JSON.parse(giveaway.announced) : (giveaway.announced || {});
+
+  // Pull every live comment in chronological order with author identity
+  // attached so the announcement embed can name the winner properly.
+  const [comments] = await pool.execute(
+    `SELECT fc.id, fc.content, fc.user_id, fc.created_at,
+            u.username, u.display_name, u.discord_id, u.discord_username,
+            uc_main.character_name AS main_character_name
+     FROM forum_comments fc
+     JOIN users u ON u.id = fc.user_id
+     LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+     WHERE fc.post_id = ? AND fc.deleted_at IS NULL
+     ORDER BY fc.created_at ASC, fc.id ASC`,
+    [postId]
+  );
+
+  let validIdx = 0;
+  let dirty = false;
+  const newlyAnnounced = [];
+  for (const c of comments) {
+    if (!pattern.test(c.content)) continue;
+    validIdx += 1;
+    if (!targets.includes(validIdx)) continue;
+    const key = String(validIdx);
+    if (winners[key]) continue; // already recorded
+    winners[key] = c.id;
+    dirty = true;
+    newlyAnnounced.push({ position: validIdx, comment: c });
+  }
+
+  if (dirty) {
+    await pool.execute(
+      `UPDATE giveaway_configs
+       SET winners = CAST(? AS JSON)
+       WHERE post_id = ?`,
+      [JSON.stringify(winners), postId]
+    );
+  }
+
+  // Announce each freshly-filled slot exactly once. The announced map is
+  // updated alongside the Discord send so a bot outage during the send
+  // doesn't permanently mark the slot as already-announced.
+  for (const win of newlyAnnounced) {
+    const key = String(win.position);
+    if (announced[key]) continue;
+    const author = win.comment;
+    const label = author.main_character_name || author.display_name || author.username;
+    const discordTag = author.discord_username ? ` (Discord: ${author.discord_username})` : '';
+    const mention = author.discord_id ? ` <@${author.discord_id}>` : '';
+    try {
+      await sendOfficerAlert(
+        `Giveaway winner — slot #${win.position}`,
+        [
+          `**Post:** [#${postId}](https://mdga.gg/forum/post/${postId})`,
+          `**Slot:** ${win.position}`,
+          `**Winner:** ${label}${discordTag}${mention}`,
+          `**Comment:** ${author.content.slice(0, 200)}`,
+        ].join('\n'),
+        0xD4AF37
+      );
+      announced[key] = 1;
+    } catch (err) {
+      console.error(`Failed to announce giveaway winner for slot ${win.position}:`, err.message);
+    }
+  }
+  if (Object.keys(announced).length > 0) {
+    await pool.execute(
+      `UPDATE giveaway_configs SET announced = CAST(? AS JSON) WHERE post_id = ?`,
+      [JSON.stringify(announced), postId]
+    );
+  }
+}
 
 // POST /api/forum/posts/:id/vote
 router.post('/posts/:id/vote', requireAuth, async (req, res) => {
@@ -1111,5 +1240,119 @@ router.post('/categories/:id/mark-read', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to mark as read' });
   }
 });
+
+// ── Giveaway config (forum #29-followup: automate "first / Nth comment wins") ──
+// Officer / forum.manage_giveaway sets a per-post config; the comment
+// creation route (above) checks for it and marks winners + announces.
+
+function canManageGiveaway(user) {
+  if (!user) return false;
+  if (['officer', 'guildmaster'].includes(user.rank)) return true;
+  return Array.isArray(user.permissions) && user.permissions.includes('forum.manage_giveaway');
+}
+
+function parsePositions(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_) {}
+    return raw.split(',').map((s) => parseInt(s.trim(), 10));
+  }
+  return [];
+}
+
+// GET /api/forum/posts/:id/giveaway — read config + winner state. Public
+// read so officers can poll from the modal without re-auth bouncing; the
+// only thing returned is metadata, no PII.
+router.get('/posts/:id/giveaway', async (req, res) => {
+  try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    const [rows] = await pool.execute(
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, winners, announced, created_at, updated_at FROM giveaway_configs WHERE post_id = ?',
+      [postId]
+    );
+    if (rows.length === 0) return res.json({ config: null });
+    const r = rows[0];
+    res.json({
+      config: {
+        post_id: r.post_id,
+        target_positions: typeof r.target_positions === 'string' ? JSON.parse(r.target_positions) : r.target_positions,
+        valid_pattern: r.valid_pattern,
+        rate_limit_seconds: r.rate_limit_seconds,
+        winners: typeof r.winners === 'string' ? JSON.parse(r.winners) : r.winners,
+        announced: typeof r.announced === 'string' ? JSON.parse(r.announced) : r.announced,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      },
+    });
+  } catch (err) {
+    console.error('Get giveaway error:', err);
+    res.status(500).json({ error: 'Failed to load giveaway config' });
+  }
+});
+
+// PUT /api/forum/posts/:id/giveaway — upsert config. Validates the regex
+// before saving so a typo can't crash the comment hook later.
+router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
+  try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    if (!canManageGiveaway(req.user)) return res.status(403).json({ error: 'Not authorized' });
+
+    const [[exists]] = await pool.execute('SELECT id FROM forum_posts WHERE id = ? AND deleted_at IS NULL', [postId]);
+    if (!exists) return res.status(404).json({ error: 'Post not found' });
+
+    const positions = parsePositions(req.body.target_positions);
+    const cleanPositions = positions
+      .map((n) => parseInt(n, 10))
+      .filter((n) => Number.isInteger(n) && n > 0 && n <= 100000);
+    if (cleanPositions.length === 0) {
+      return res.status(400).json({ error: 'At least one valid target position is required (positive integer).' });
+    }
+    const dedupSorted = Array.from(new Set(cleanPositions)).sort((a, b) => a - b);
+
+    const validPattern = String(req.body.valid_pattern || '^(MDGA|MEGA)!$').slice(0, 200);
+    try {
+      new RegExp(validPattern); // throws on bad regex
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid valid_pattern regex: ' + e.message });
+    }
+
+    const rateLimitSeconds = Math.max(0, Math.min(3600, parseInt(req.body.rate_limit_seconds, 10) || 0));
+
+    await pool.execute(
+      `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, created_by)
+       VALUES (?, CAST(? AS JSON), ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         target_positions = VALUES(target_positions),
+         valid_pattern = VALUES(valid_pattern),
+         rate_limit_seconds = VALUES(rate_limit_seconds)`,
+      [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, req.user.id]
+    );
+    res.json({ message: 'Giveaway config saved', target_positions: dedupSorted });
+  } catch (err) {
+    console.error('Save giveaway error:', err);
+    res.status(500).json({ error: 'Failed to save giveaway config' });
+  }
+});
+
+// DELETE /api/forum/posts/:id/giveaway — remove giveaway config (does not
+// touch any comments or already-awarded winners, just stops future ticks).
+router.delete('/posts/:id/giveaway', requireAuth, async (req, res) => {
+  try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    if (!canManageGiveaway(req.user)) return res.status(403).json({ error: 'Not authorized' });
+    await pool.execute('DELETE FROM giveaway_configs WHERE post_id = ?', [postId]);
+    res.json({ message: 'Giveaway disabled' });
+  } catch (err) {
+    console.error('Delete giveaway error:', err);
+    res.status(500).json({ error: 'Failed to disable giveaway' });
+  }
+});
+
 
 module.exports = router;

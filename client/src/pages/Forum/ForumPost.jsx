@@ -56,6 +56,14 @@ export default function ForumPost() {
   const [commentRevisions, setCommentRevisions] = useState(null);
   // Image lightbox (forum #29 / #35): src of the image currently enlarged.
   const [lightboxSrc, setLightboxSrc] = useState(null);
+  // Giveaway config modal (officer / forum.manage_giveaway only).
+  const [giveawayOpen, setGiveawayOpen] = useState(false);
+  const [giveawayConfig, setGiveawayConfig] = useState(null);
+  const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
+  const [giveawayPattern, setGiveawayPattern] = useState('^(MDGA|MEGA)!$');
+  const [giveawayRateMin, setGiveawayRateMin] = useState('5');
+  const [giveawaySaving, setGiveawaySaving] = useState(false);
+  const [giveawayError, setGiveawayError] = useState('');
 
   const openEditPost = () => {
     if (!post) return;
@@ -251,6 +259,75 @@ export default function ForumPost() {
         ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 0);
+  }
+
+  async function openGiveaway() {
+    setGiveawayOpen(true);
+    setGiveawayError('');
+    try {
+      const res = await apiFetch(`/forum/posts/${post.id}/giveaway`);
+      if (res.ok) {
+        const data = await res.json();
+        const cfg = data.config;
+        setGiveawayConfig(cfg);
+        if (cfg) {
+          setGiveawayPositions((cfg.target_positions || []).join(', '));
+          setGiveawayPattern(cfg.valid_pattern || '^(MDGA|MEGA)!$');
+          setGiveawayRateMin(String(Math.round((cfg.rate_limit_seconds || 0) / 60)));
+        } else {
+          setGiveawayPositions('1, 100');
+          setGiveawayPattern('^(MDGA|MEGA)!$');
+          setGiveawayRateMin('5');
+        }
+      }
+    } catch {
+      setGiveawayConfig(null);
+    }
+  }
+
+  async function saveGiveaway() {
+    setGiveawaySaving(true);
+    setGiveawayError('');
+    try {
+      const positions = giveawayPositions.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isInteger(n) && n > 0);
+      if (positions.length === 0) {
+        setGiveawayError('At least one valid position is required.');
+        return;
+      }
+      const rateSec = Math.max(0, Math.min(60, parseInt(giveawayRateMin, 10) || 0)) * 60;
+      const res = await apiFetch(`/forum/posts/${post.id}/giveaway`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          target_positions: positions,
+          valid_pattern: giveawayPattern,
+          rate_limit_seconds: rateSec,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setGiveawayError(data.error || 'Failed to save.');
+        return;
+      }
+      setGiveawayOpen(false);
+    } catch {
+      setGiveawayError('Failed to save.');
+    } finally {
+      setGiveawaySaving(false);
+    }
+  }
+
+  async function disableGiveaway() {
+    if (!window.confirm('Disable the giveaway on this post? Past winners stay recorded; future comments stop being checked.')) return;
+    setGiveawaySaving(true);
+    try {
+      const res = await apiFetch(`/forum/posts/${post.id}/giveaway`, { method: 'DELETE' });
+      if (res.ok) {
+        setGiveawayConfig(null);
+        setGiveawayOpen(false);
+      }
+    } finally {
+      setGiveawaySaving(false);
+    }
   }
 
   async function openCommentRevisions(commentId) {
@@ -587,6 +664,12 @@ export default function ForumPost() {
                     >
                       Revisions{post.revision_count > 0 ? ` (${post.revision_count})` : ''}
                     </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={openGiveaway}
+                      title="Configure giveaway automation (first / Nth comment wins)"
+                    >Giveaway</button>
                   </>
                 )}
                 <button type="button" className="btn btn--danger btn--sm" onClick={handleDeletePost}>Delete post</button>
@@ -904,6 +987,73 @@ export default function ForumPost() {
                   ))}
                 </ol>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {giveawayOpen && (
+        <div className={styles.revisionsBackdrop} onClick={() => setGiveawayOpen(false)} role="dialog" aria-modal="true">
+          <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
+            <header className={styles.revisionsHeader}>
+              <h2>Configure giveaway — post #{post.id}</h2>
+              <button type="button" onClick={() => setGiveawayOpen(false)} className={styles.revisionsClose} aria-label="Close">×</button>
+            </header>
+            <div className={styles.revisionsBody}>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: 13, marginTop: 0 }}>
+                Comments matching the pattern below are counted in chronological order. Whoever lands on a target position wins; the bot announces in the officer channel.
+              </p>
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Target positions (comma-separated)</span>
+                <input
+                  type="text"
+                  value={giveawayPositions}
+                  onChange={(e) => setGiveawayPositions(e.target.value)}
+                  placeholder="1, 100"
+                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                />
+              </label>
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Valid pattern (regex)</span>
+                <input
+                  type="text"
+                  value={giveawayPattern}
+                  onChange={(e) => setGiveawayPattern(e.target.value)}
+                  placeholder="^(MDGA|MEGA)!$"
+                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-mono, monospace)' }}
+                />
+              </label>
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = disabled)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="60"
+                  value={giveawayRateMin}
+                  onChange={(e) => setGiveawayRateMin(e.target.value)}
+                  style={{ width: 120, padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                />
+              </label>
+              {giveawayConfig?.winners && Object.keys(giveawayConfig.winners).length > 0 && (
+                <div style={{ marginTop: 16, padding: 12, background: 'rgba(212, 175, 55, 0.08)', borderRadius: 'var(--border-radius-sm)' }}>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-gold)', marginBottom: 4 }}>Current winners</span>
+                  {Object.entries(giveawayConfig.winners).map(([pos, cid]) => (
+                    <div key={pos} style={{ fontSize: 13 }}>Slot #{pos} → comment {cid}</div>
+                  ))}
+                </div>
+              )}
+              {giveawayError && <p style={{ color: 'var(--color-red-light)', marginTop: 12 }}>{giveawayError}</p>}
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                {giveawayConfig && (
+                  <button type="button" className="btn btn--danger btn--sm" onClick={disableGiveaway} disabled={giveawaySaving}>
+                    Disable giveaway
+                  </button>
+                )}
+                <button type="button" className="btn btn--secondary btn--sm" onClick={() => setGiveawayOpen(false)}>Cancel</button>
+                <button type="button" className="btn btn--primary btn--sm" onClick={saveGiveaway} disabled={giveawaySaving}>
+                  {giveawaySaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
