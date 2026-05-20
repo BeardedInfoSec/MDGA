@@ -190,8 +190,22 @@ export default function ForumCategory() {
               <option value={20}>20 / page</option>
               <option value={50}>50 / page</option>
             </select>
+            {isLoggedIn && category && posts.some((p) => p.is_unread) && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                style={{ marginLeft: 'auto' }}
+                onClick={async () => {
+                  const res = await apiFetch(`/forum/categories/${category.id}/mark-read`, { method: 'POST' });
+                  if (res.ok) setPosts((prev) => prev.map((p) => ({ ...p, is_unread: 0 })));
+                }}
+                title="Mark every post in this category as read"
+              >
+                Mark all read
+              </button>
+            )}
             {canPost && (
-              <Link to={`/forum/new/${slug}`} className="btn btn--primary btn--sm" style={{ marginLeft: 'auto' }}>
+              <Link to={`/forum/new/${slug}`} className="btn btn--primary btn--sm" style={{ marginLeft: posts.some((p) => p.is_unread) ? 'var(--space-2)' : 'auto' }}>
                 New Post
               </Link>
             )}

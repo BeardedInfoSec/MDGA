@@ -1046,4 +1046,54 @@ router.put('/posts/:id/lock', requireAuth, requirePermission('forum.lock_posts')
   }
 });
 
+
+// POST /api/forum/categories/:id/mark-read — upsert a viewed_at = NOW() for
+// every live post in the category, so the unread dot / category badge
+// clears in one action (rapazzini follow-up: requiring users to click
+// every post to clear unread isn't workable). Accepts numeric id only;
+// slugs aren't worth supporting here since this is always triggered from
+// a page that already has the resolved category id.
+//
+// Pass '0' or 'all' for the id to clear unread across every category the
+// user can access (forum index Mark-all-read button).
+router.post('/categories/:id/mark-read', requireAuth, async (req, res) => {
+  try {
+    const param = String(req.params.id || '');
+    const isGlobal = param === '0' || param.toLowerCase() === 'all';
+    const canAccessOfficer = hasOfficerCategoryAccess(req.user);
+    const officerClause = canAccessOfficer ? '' : 'AND fc.officer_only = 0';
+
+    let where, params;
+    if (isGlobal) {
+      where = 'WHERE fp.deleted_at IS NULL ' + officerClause;
+      params = [];
+    } else {
+      const id = parseInt(param, 10);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid category id' });
+      }
+      where = 'WHERE fp.category_id = ? AND fp.deleted_at IS NULL ' + officerClause;
+      params = [id];
+    }
+
+    // Single round-trip: insert a view row for every post the user can see
+    // in scope. ON DUPLICATE refreshes viewed_at on existing rows. We don't
+    // bump fp.view_count here — that counter tracks first-time visits, not
+    // bulk dismissals.
+    const [result] = await pool.execute(
+      `INSERT INTO forum_post_views (post_id, user_id, viewed_at)
+       SELECT fp.id, ?, NOW()
+       FROM forum_posts fp
+       JOIN forum_categories fc ON fc.id = fp.category_id
+       ${where}
+       ON DUPLICATE KEY UPDATE viewed_at = NOW()`,
+      [req.user.id, ...params]
+    );
+    res.json({ marked: result.affectedRows });
+  } catch (err) {
+    console.error('Mark category read error:', err);
+    res.status(500).json({ error: 'Failed to mark as read' });
+  }
+});
+
 module.exports = router;

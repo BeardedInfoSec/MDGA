@@ -175,6 +175,19 @@ export default function ForumIndex() {
             >
               Search
             </button>
+            {isLoggedIn && categories.some((c) => c.unread_count > 0) && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={async () => {
+                  const res = await apiFetch('/forum/categories/all/mark-read', { method: 'POST' });
+                  if (res.ok) setCategories((prev) => prev.map((c) => ({ ...c, unread_count: 0 })));
+                }}
+                title="Clear unread badges across every category you can see"
+              >
+                Mark all read
+              </button>
+            )}
           </div>
 
           {/* Search results OR welcome / categories grid */}
