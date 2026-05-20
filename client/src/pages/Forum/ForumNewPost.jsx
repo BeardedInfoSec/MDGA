@@ -282,7 +282,7 @@ export default function ForumNewPost() {
                     id="forum-post-image"
                     type="file"
                     multiple
-                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    accept="image/jpeg,image/png,image/gif,image/webp,image/avif"
                     onChange={handleImageChange}
                     className={styles.composeFileInput}
                   />

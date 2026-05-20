@@ -107,7 +107,7 @@ export default function EventScreenshotsModal({ event, apiFetch, showToast, onCl
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
             multiple
             onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
             className={styles.fileInput}

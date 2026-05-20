@@ -786,7 +786,7 @@ export default function ForumPost() {
                       ref={commentImageRef}
                       id="forum-reply-image"
                       type="file"
-                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      accept="image/jpeg,image/png,image/gif,image/webp,image/avif"
                       onChange={handleCommentImageChange}
                       className={styles.composeFileInput}
                     />

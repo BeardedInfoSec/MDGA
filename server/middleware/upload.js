@@ -14,6 +14,7 @@ const MIME_TO_EXT = {
   'image/png': 'png',
   'image/gif': 'gif',
   'image/webp': 'webp',
+  'image/avif': 'avif',
 };
 const ALLOWED_MIME_TYPES = Object.keys(MIME_TO_EXT);
 
@@ -47,6 +48,18 @@ function detectImageExtension(buffer) {
     return 'webp';
   }
 
+  // AVIF: ISOBMFF box, bytes 4-7 = "ftyp", brand at 8-11 in {avif, avis, mif1}.
+  // Some encoders use "mif1" as the major brand for still images even when
+  // the file is functionally AVIF — sharp handles all three the same way.
+  if (
+    buffer[4] === 0x66 && buffer[5] === 0x74 && buffer[6] === 0x79 && buffer[7] === 0x70
+  ) {
+    const brand = buffer.slice(8, 12).toString('ascii');
+    if (brand === 'avif' || brand === 'avis' || brand === 'mif1') {
+      return 'avif';
+    }
+  }
+
   return null;
 }
 
@@ -54,7 +67,7 @@ function fileFilter(req, file, cb) {
   if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Only JPEG, PNG, GIF, and WebP images are allowed'), false);
+    cb(new Error('Only JPEG, PNG, GIF, WebP, and AVIF images are allowed'), false);
   }
 }
 
