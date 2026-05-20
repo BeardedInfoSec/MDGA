@@ -52,8 +52,7 @@ function hasOfficerCategoryAccess(user) {
 // fixed for every drop now, so officers configure positions + cooldown
 // only. Change here to flip every future giveaway in one edit.
 const GIVEAWAY_VALID_PATTERN = '^(MDGA|MEGA)!$';
-// TEST CHANNEL — flip back to 1483266989647724758 (Events) for real drops.
-const GIVEAWAY_CHANNEL_ID = '1504276476634071102';
+const GIVEAWAY_CHANNEL_ID = '1483266989647724758'; // Events channel — live drops
 
 // Scheduled-publish gating (rapazzini forum #39). A non-officer viewer must
 // not see a post whose publish_at is still in the future; officers can,
