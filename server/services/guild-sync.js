@@ -68,6 +68,16 @@ async function syncGuild(guild) {
   if (acceptRoster) {
     const rankChanges = [];
 
+    // Snapshot existing character names BEFORE the upsert so we can diff
+    // joined / left after the round-trip (forum #31). Keep realm so the
+    // event row remembers which armory each character belongs to.
+    const [priorRows] = await pool.execute(
+      'SELECT character_name, realm_slug FROM guild_members WHERE guild_id = ?',
+      [guild.id]
+    );
+    const priorByName = new Map(priorRows.map((r) => [r.character_name, r.realm_slug]));
+    const currentNames = new Set(roster.map((m) => m.character_name));
+
     for (const member of roster) {
       // Check for rank change before upsert
       const [existing] = await pool.execute(
@@ -109,6 +119,29 @@ async function syncGuild(guild) {
       `DELETE FROM guild_members WHERE guild_id = ? AND character_name NOT IN (${placeholders})`,
       [guild.id, ...rosterNames]
     );
+
+    // Diff prior vs. current to emit join/leave events (forum #31). We do
+    // this after the upsert+delete so any catastrophic-drop guard above
+    // applies — we don't want to log 800 fake "left" events if a bad API
+    // response wiped the roster.
+    const joinedEvents = roster
+      .filter((m) => !priorByName.has(m.character_name))
+      .map((m) => [guild.id, m.character_name, m.realm_slug, 'joined']);
+    const leftEvents = [];
+    for (const [name, realm] of priorByName.entries()) {
+      if (!currentNames.has(name)) {
+        leftEvents.push([guild.id, name, realm, 'left']);
+      }
+    }
+    const allEvents = [...joinedEvents, ...leftEvents];
+    if (allEvents.length > 0) {
+      const valuesSql = allEvents.map(() => '(?, ?, ?, ?)').join(', ');
+      const params = allEvents.flat();
+      await pool.execute(
+        `INSERT INTO guild_membership_events (guild_id, character_name, realm_slug, event_type) VALUES ${valuesSql}`,
+        params
+      );
+    }
 
     // Cross-reference guild members with site users
     await crossLinkMembers(guild.id);
@@ -288,13 +321,27 @@ async function processRankChanges(guildId, changes) {
         }
       }
 
-      if (addRoles.length > 0 || removeRoles.length > 0) {
+      // Only act + notify if the new rank maps to a managed role we're not already on,
+      // or if the mapping specifies a site rank we need to apply. This avoids spamming
+      // the officer channel when the addon reports rank flips between unmapped ranks.
+      const newRoleId = newMapping?.discord_role_id || null;
+      const oldRoleId = oldMapping?.discord_role_id || null;
+      const discordRoleChanged = newRoleId !== oldRoleId;
+
+      let siteRankChanged = false;
+      if (newMapping?.site_rank) {
+        const [currentRank] = await pool.execute('SELECT `rank` FROM users WHERE id = ?', [userId]);
+        siteRankChanged = currentRank.length > 0 && currentRank[0].rank !== newMapping.site_rank;
+      }
+
+      if (!discordRoleChanged && !siteRankChanged) continue;
+
+      if (discordRoleChanged && (addRoles.length > 0 || removeRoles.length > 0)) {
         await setMemberRoles(discordId, addRoles, removeRoles);
         console.log(`[Game rank sync] ${change.characterName}: rank ${change.oldRank} → ${change.newRank}, Discord roles updated for ${username}`);
       }
 
-      // Update site rank if mapping specifies one
-      if (newMapping?.site_rank) {
+      if (siteRankChanged) {
         await pool.execute('UPDATE users SET `rank` = ? WHERE id = ?', [newMapping.site_rank, userId]);
         console.log(`[Game rank sync] ${username}: site rank updated to ${newMapping.site_rank}`);
       }
@@ -303,7 +350,8 @@ async function processRankChanges(guildId, changes) {
         'In-Game Rank Change Detected',
         `**${change.characterName}** rank changed: **${change.oldRank}** → **${change.newRank}**\n` +
         `Site user: **${username}**\n` +
-        `Discord roles ${addRoles.length > 0 ? 'updated' : 'unchanged'}`,
+        `Discord roles ${discordRoleChanged ? 'updated' : 'unchanged'}` +
+        (siteRankChanged ? `\nSite rank: **${newMapping.site_rank}**` : ''),
         0x5865F2
       );
     } catch (err) {

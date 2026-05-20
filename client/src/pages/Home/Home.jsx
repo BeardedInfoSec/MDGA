@@ -37,6 +37,9 @@ export default function Home() {
     }
   });
   const [slide, setSlide] = useState(0);
+  // Lightbox state: the carousel image currently enlarged, or null. Closing
+  // also responds to Esc; see the keydown listener below.
+  const [lightbox, setLightbox] = useState(null);
 
   // Fetch carousel images (public endpoint, no auth needed)
   useEffect(() => {
@@ -67,12 +70,21 @@ export default function Home() {
     if (imageCount > 0) setSlide((s) => (s - 1 + imageCount) % imageCount);
   }, [imageCount]);
 
-  // Auto-advance every 5s
+  // Auto-advance every 5s. Pause auto-advance while the lightbox is open
+  // so the underlying carousel doesn't drift behind the enlarged image.
   useEffect(() => {
-    if (imageCount === 0) return;
+    if (imageCount === 0 || lightbox) return;
     const timer = setInterval(nextSlide, 5000);
     return () => clearInterval(timer);
-  }, [nextSlide, imageCount]);
+  }, [nextSlide, imageCount, lightbox]);
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => { if (e.key === 'Escape') setLightbox(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   const loadDashboard = useCallback(async () => {
     if (!isLoggedIn) {
@@ -484,7 +496,17 @@ export default function Home() {
                 >
                   {carouselImages.map((img) => (
                     <div key={img.id} className={styles.carouselSlide}>
-                      <img src={img.image_url} alt={img.alt_text} />
+                      <button
+                        type="button"
+                        className={styles.carouselSlideBtn}
+                        onClick={() => setLightbox(img)}
+                        aria-label={`Enlarge image: ${img.alt_text || 'Carousel image'}`}
+                      >
+                        <img src={img.image_url} alt={img.alt_text} />
+                      </button>
+                      {img.alt_text && (
+                        <figcaption className={styles.carouselCaption}>{img.alt_text}</figcaption>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -521,7 +543,17 @@ export default function Home() {
                 >
                   {carouselImages.map((img) => (
                     <div key={img.id} className={styles.carouselSlide}>
-                      <img src={img.image_url} alt={img.alt_text} />
+                      <button
+                        type="button"
+                        className={styles.carouselSlideBtn}
+                        onClick={() => setLightbox(img)}
+                        aria-label={`Enlarge image: ${img.alt_text || 'Carousel image'}`}
+                      >
+                        <img src={img.image_url} alt={img.alt_text} />
+                      </button>
+                      {img.alt_text && (
+                        <figcaption className={styles.carouselCaption}>{img.alt_text}</figcaption>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -608,6 +640,29 @@ export default function Home() {
             </a>
           </div>
         </section>
+      )}
+
+      {lightbox && (
+        <div
+          className={styles.lightboxBackdrop}
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox.alt_text || 'Enlarged image'}
+        >
+          <button
+            type="button"
+            className={styles.lightboxClose}
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+          >×</button>
+          <figure className={styles.lightboxFigure} onClick={(e) => e.stopPropagation()}>
+            <img src={lightbox.image_url} alt={lightbox.alt_text || ''} className={styles.lightboxImg} />
+            {lightbox.alt_text && (
+              <figcaption className={styles.lightboxCaption}>{lightbox.alt_text}</figcaption>
+            )}
+          </figure>
+        </div>
       )}
     </>
   );

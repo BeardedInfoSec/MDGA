@@ -40,18 +40,26 @@ function normalizeEventPayload(payload) {
 // GET /api/events — public, optionally includes user RSVP status if authenticated
 router.get('/', async (req, res) => {
   try {
-    // Try to extract user ID from token (optional — no 401 if missing/invalid)
+    // Try to extract user ID + rank from token (optional — no 401 if
+    // missing/invalid). Rank determines whether scheduled (future
+    // publish_at) events are visible.
     let userId = null;
+    let viewerRank = null;
+    let viewerPerms = [];
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
         userId = decoded.id;
+        viewerRank = decoded.rank || null;
+        viewerPerms = Array.isArray(decoded.permissions) ? decoded.permissions : [];
       } catch { /* ignore invalid token */ }
     }
+    const canSeeScheduled = ['officer', 'guildmaster'].includes(viewerRank) || viewerPerms.includes('events.manage');
+    const publishGate = canSeeScheduled ? '' : 'AND (e.publish_at IS NULL OR e.publish_at <= NOW())';
 
     const [rows] = await pool.execute(`
-      SELECT e.id, e.title,
+      SELECT e.id, e.title, e.publish_at,
              DATE_FORMAT(e.starts_at, '%Y-%m-%d %H:%i:%s') AS starts_at,
              DATE_FORMAT(e.ends_at, '%Y-%m-%d %H:%i:%s') AS ends_at,
              e.timezone, e.category, e.description, e.prize,
@@ -67,7 +75,7 @@ router.get('/', async (req, res) => {
         (SELECT COUNT(*) FROM event_screenshots s WHERE s.event_id = e.id) AS screenshot_count
       FROM events e
       LEFT JOIN users creator ON creator.id = e.created_by
-      WHERE e.starts_at IS NOT NULL
+      WHERE e.starts_at IS NOT NULL ${publishGate}
       ORDER BY e.starts_at ASC
     `);
 
@@ -240,10 +248,20 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
         conn.release();
       }
     } else {
-      // Single event (no recurrence)
+      // Single event (no recurrence). publish_at is optional (forum #39):
+      // future timestamp hides the event from non-managers until then.
+      // Only events.manage already gates this route, so any value here is
+      // implicitly authorized. ISO normalization keeps mysql2 happy.
+      let publishAtValue = null;
+      if (req.body.publishAt) {
+        const parsed = new Date(req.body.publishAt);
+        if (!Number.isNaN(parsed.getTime())) {
+          publishAtValue = parsed.toISOString().slice(0, 19).replace('T', ' ');
+        }
+      }
       const [result] = await pool.execute(
-        'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, prize, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [title, startsAtUtc, endsAtUtc, timezone, category, description || '', prizeValue, req.user.id]
+        'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, prize, created_by, publish_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, startsAtUtc, endsAtUtc, timezone, category, description || '', prizeValue, req.user.id, publishAtValue]
       );
       res.status(201).json({ id: result.insertId, message: 'Event created' });
     }

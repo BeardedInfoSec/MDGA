@@ -10,6 +10,7 @@ import {
 import { Alert } from '../../components/ui';
 import MarkdownContent from '../../components/common/MarkdownContent';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
+import MentionSuggest from '../../components/common/MentionSuggest';
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
@@ -52,6 +53,8 @@ export default function ForumPost() {
   // Comment revisions modal (officer view of a single reply's edit history).
   const [commentRevisionsId, setCommentRevisionsId] = useState(null);
   const [commentRevisions, setCommentRevisions] = useState(null);
+  // Image lightbox (forum #29 / #35): src of the image currently enlarged.
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const openEditPost = () => {
     if (!post) return;
@@ -144,6 +147,14 @@ export default function ForumPost() {
   }, [id, isLoggedIn, apiFetch]);
 
   useEffect(() => { loadPost(); }, [loadPost]);
+
+  // Esc closes the image lightbox (matches Home carousel behavior).
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e) => { if (e.key === 'Escape') setLightboxSrc(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxSrc]);
 
   async function handleVote(vote) {
     if (!isLoggedIn) return;
@@ -487,9 +498,29 @@ export default function ForumPost() {
 
             <MarkdownContent source={post.content} className={styles.postBodyText} />
 
-            {post.image_url && (
-              <img src={post.image_url} alt="Post" className={styles.postImageInline} />
-            )}
+            {/* Multi-image gallery (forum #29). Falls back to the legacy
+                single image_url when the post predates the migration. */}
+            {(() => {
+              const images = (post.images && post.images.length > 0)
+                ? post.images
+                : (post.image_url ? [post.image_url] : []);
+              if (images.length === 0) return null;
+              return (
+                <div className={images.length === 1 ? styles.postImageSingle : styles.postImageGallery}>
+                  {images.map((src, i) => (
+                    <button
+                      type="button"
+                      key={src + i}
+                      className={styles.postImageBtn}
+                      onClick={() => setLightboxSrc(src)}
+                      aria-label={`Enlarge image ${i + 1}`}
+                    >
+                      <img src={src} alt={`Attachment ${i + 1}`} className={styles.postImageInline} loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Engagement bar */}
             <div className={styles.postEngagement}>
@@ -734,9 +765,15 @@ export default function ForumPost() {
                     id="forum-reply-textarea"
                     value={commentText}
                     onChange={setCommentText}
-                    placeholder="Write your reply… Markdown supported."
+                    placeholder="Write your reply… Markdown supported. Type @ to mention."
                     rows={5}
                     maxLength={REPLY_MAX + 100}
+                  />
+                  <MentionSuggest
+                    textareaId="forum-reply-textarea"
+                    value={commentText}
+                    onChange={setCommentText}
+                    apiFetch={apiFetch}
                   />
                 </label>
 
@@ -814,6 +851,29 @@ export default function ForumPost() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {lightboxSrc && (
+        <div
+          className={styles.imageLightboxBackdrop}
+          onClick={() => setLightboxSrc(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Enlarged image"
+        >
+          <button
+            type="button"
+            className={styles.imageLightboxClose}
+            onClick={() => setLightboxSrc(null)}
+            aria-label="Close"
+          >×</button>
+          <img
+            src={lightboxSrc}
+            alt=""
+            className={styles.imageLightboxImg}
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 

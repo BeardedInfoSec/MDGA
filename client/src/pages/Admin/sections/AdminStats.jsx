@@ -23,13 +23,18 @@ function fmt(n) {
 export default function AdminStats({ apiFetch, showToast }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [membership, setMembership] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch('/admin/stats');
-      if (res.ok) setData(await res.json());
+      const [statsRes, memRes] = await Promise.all([
+        apiFetch('/admin/stats'),
+        apiFetch('/guild/membership-events?limit=15'),
+      ]);
+      if (statsRes.ok) setData(await statsRes.json());
       else showToast?.('Failed to load stats');
+      if (memRes.ok) setMembership(await memRes.json());
     } catch {
       showToast?.('Failed to load stats');
     } finally {
@@ -145,6 +150,21 @@ export default function AdminStats({ apiFetch, showToast }) {
           meta: `${p.display_rank || fullDisplayName(p)} in ${p.category_name} · ${timeAgo(p.created_at)}`,
           link: postUrlFromParts(p.id, p.title),
         }))} empty="No posts yet." />
+
+        {/* Federation join/leave feed (forum #31). Counts header summarizes
+            the last day + 7 days so officers can spot churn at a glance. */}
+        <ActivityCol
+          title={membership?.counts
+            ? `Federation movement (1d: +${membership.counts.joined_1d || 0}/-${membership.counts.left_1d || 0} · 7d: +${membership.counts.joined_7d || 0}/-${membership.counts.left_7d || 0})`
+            : 'Federation movement'}
+          rows={(membership?.events || []).map((e) => ({
+            key: `m-${e.id}`,
+            primary: `${e.event_type === 'joined' ? '+' : '−'} ${e.character_name}`,
+            meta: `${e.event_type === 'joined' ? 'joined' : 'left'} ${e.guild_name || e.guild_realm} · ${timeAgo(e.occurred_at)}`,
+            link: e.linked_user_id ? `/profile?id=${e.linked_user_id}` : null,
+          }))}
+          empty="No roster movement yet — wait for the next guild sync cycle."
+        />
       </div>
 
       <p className={styles.generatedAt}>Generated {new Date(data.generatedAt).toLocaleString()}</p>
@@ -171,7 +191,9 @@ function ActivityCol({ title, rows, empty }) {
         <ul className={styles.activityList}>
           {rows.map((r) => (
             <li key={r.key} className={styles.activityRow}>
-              <Link to={r.link} className={styles.activityPrimary}>{r.primary}</Link>
+              {r.link
+                ? <Link to={r.link} className={styles.activityPrimary}>{r.primary}</Link>
+                : <span className={styles.activityPrimary}>{r.primary}</span>}
               <span className={styles.activityMeta}>{r.meta}</span>
             </li>
           ))}

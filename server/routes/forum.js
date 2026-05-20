@@ -46,6 +46,16 @@ function hasOfficerCategoryAccess(user) {
   return Array.isArray(user.permissions) && user.permissions.includes('forum.access_officer_categories');
 }
 
+// Scheduled-publish gating (rapazzini forum #39). A non-officer viewer must
+// not see a post whose publish_at is still in the future; officers can,
+// rendered in muted style so they can preview/edit before the cutover.
+function canSeeScheduled(user) {
+  if (!user) return false;
+  if (['officer', 'guildmaster'].includes(user.rank)) return true;
+  return Array.isArray(user.permissions) && user.permissions.includes('forum.manage_posts');
+}
+const PUBLISH_FILTER_SQL = '(fp.publish_at IS NULL OR fp.publish_at <= NOW())';
+
 // GET /api/forum/categories
 router.get('/categories', async (req, res) => {
   try {
@@ -287,6 +297,7 @@ router.get('/categories/:id/posts', async (req, res) => {
     // comment. is_unread compares that to the viewer's recorded view time.
     // Anonymous viewers always see is_unread = 0 (no per-user tracking).
     const viewerIdForQuery = viewer ? viewer.id : 0;
+    const publishGate = canSeeScheduled(viewer) ? '' : `AND ${PUBLISH_FILTER_SQL}`;
     const [posts] = await pool.execute(`
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
@@ -320,13 +331,14 @@ router.get('/categories/:id/posts', async (req, res) => {
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
       LEFT JOIN forum_post_views view_row ON view_row.post_id = fp.id AND view_row.user_id = ?
-      WHERE fp.category_id = ? AND fp.deleted_at IS NULL
+      WHERE fp.category_id = ? AND fp.deleted_at IS NULL ${publishGate}
       ORDER BY ${orderClause}
       LIMIT ${limit} OFFSET ${offset}
     `, [viewerIdForQuery, viewerIdForQuery, resolvedCategoryId]);
 
     const [countResult] = await pool.execute(
-      'SELECT COUNT(*) AS total FROM forum_posts WHERE category_id = ? AND deleted_at IS NULL',
+      `SELECT COUNT(*) AS total FROM forum_posts fp
+       WHERE category_id = ? AND deleted_at IS NULL ${publishGate}`,
       [resolvedCategoryId]
     );
 
@@ -345,7 +357,7 @@ router.get('/categories/:id/posts', async (req, res) => {
 // POST /api/forum/posts
 router.post('/posts', requireAuth, async (req, res) => {
   try {
-    const { categoryId, title, content, imageUrl } = req.body;
+    const { categoryId, title, content, imageUrl, imageUrls, publishAt } = req.body;
     const cleanTitle = String(title || '').replace(/[\u0000-\u001F\u007F]/g, '').trim();
     const cleanContent = String(content || '').replace(/\u0000/g, '').trim();
 
@@ -354,6 +366,20 @@ router.post('/posts', requireAuth, async (req, res) => {
     }
     if (cleanTitle.length > 200) {
       return res.status(400).json({ error: 'Title must be 200 characters or less' });
+    }
+
+    // Optional scheduled publish (rapazzini forum #39). Only officers /
+    // forum.manage_posts may push a future date; regular members get NULL.
+    let publishAtValue = null;
+    if (publishAt) {
+      const parsed = new Date(publishAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'Invalid publishAt timestamp' });
+      }
+      if (parsed.getTime() > Date.now() && !canSeeScheduled(req.user)) {
+        return res.status(403).json({ error: 'Only officers can schedule posts for the future' });
+      }
+      publishAtValue = parsed.toISOString().slice(0, 19).replace('T', ' ');
     }
 
     // Check category-level posting restrictions:
@@ -375,10 +401,25 @@ router.post('/posts', requireAuth, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url) VALUES (?, ?, ?, ?, ?)',
-      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null]
+      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue]
     );
-    res.status(201).json({ id: result.insertId, message: 'Post created' });
+    const newPostId = result.insertId;
+    // Multi-image attachments (forum #29). The single image_url stays
+    // populated above for back-compat with anything that reads the legacy
+    // column; everything new reads from forum_post_images instead.
+    const urls = Array.isArray(imageUrls) ? imageUrls : [];
+    if (imageUrl && !urls.includes(imageUrl)) urls.unshift(imageUrl);
+    const cleanUrls = urls
+      .map((u) => (typeof u === 'string' ? u.trim() : ''))
+      .filter((u) => u && u.length <= 500)
+      .slice(0, 10);
+    if (cleanUrls.length > 0) {
+      const values = cleanUrls.map((_, i) => '(?, ?, ?)').join(', ');
+      const params = cleanUrls.flatMap((u, i) => [newPostId, u, i]);
+      await pool.execute(`INSERT INTO forum_post_images (post_id, image_url, sort_order) VALUES ${values}`, params);
+    }
+    res.status(201).json({ id: newPostId, message: 'Post created' });
   } catch (err) {
     console.error('Create post error:', err);
     res.status(500).json({ error: 'Failed to create post' });
@@ -430,6 +471,12 @@ router.get('/posts/:id', async (req, res) => {
     }
     if (postRows[0].officer_only && !hasOfficerCategoryAccess(viewer)) {
       return res.status(403).json({ error: 'You do not have access to this post' });
+    }
+    // Scheduled-publish gate: hide future-dated posts from non-officers.
+    // Officers see them with publish_at set so the frontend can render a
+    // "Scheduled for…" banner.
+    if (postRows[0].publish_at && new Date(postRows[0].publish_at) > new Date() && !canSeeScheduled(viewer)) {
+      return res.status(404).json({ error: 'Post not found' });
     }
 
     // Track view per (post, user) so we can compute unread state on the
@@ -487,6 +534,15 @@ router.get('/posts/:id', async (req, res) => {
 
     const post = { ...postRows[0] };
     delete post.officer_only;
+
+    // Attach the multi-image array (forum #29). Empty array on legacy posts
+    // with no images. The single image_url legacy field is also kept on the
+    // post object for any old client that reads it.
+    const [imgRows] = await pool.execute(
+      'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC',
+      [postId]
+    );
+    post.images = imgRows.map((r) => r.image_url);
 
     res.json({ post, comments, userVote });
   } catch (err) {

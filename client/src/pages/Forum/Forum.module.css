@@ -1893,6 +1893,100 @@
   vertical-align: middle;
 }
 
+/* Multi-image gallery on a forum post (forum #29). Single-image posts
+   use the existing inline rendering; 2+ become a tight grid. */
+.postImageSingle {
+  margin-top: var(--space-3);
+}
+
+.postImageGallery {
+  margin-top: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+
+.postImageBtn {
+  all: unset;
+  cursor: zoom-in;
+  display: block;
+  border-radius: var(--border-radius-sm);
+  overflow: hidden;
+}
+
+.postImageBtn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-fast);
+}
+
+.postImageBtn:hover img { transform: scale(1.02); }
+
+/* Image lightbox shared by post gallery + comments. Same shape as
+   Home.module.css lightbox; scoped here so the forum styles stand alone. */
+.imageLightboxBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  cursor: zoom-out;
+}
+
+.imageLightboxImg {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: var(--border-radius-sm);
+  cursor: default;
+}
+
+.imageLightboxClose {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-primary);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Compose form: side-by-side preview thumbnails for the upload picker. */
+.composeGalleryGrid {
+  margin-top: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--space-2);
+}
+
+.composeGalleryItem {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--color-gray-800);
+}
+
+.composeTextInput {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2);
+  background: var(--color-black);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+}
+
 .forumUnreadBadge {
   display: inline-flex;
   align-items: center;

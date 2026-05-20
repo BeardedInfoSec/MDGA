@@ -294,4 +294,35 @@ router.post('/:id/resend-invite', requireAuth, requirePermission('admin.manage_u
   }
 });
 
+// GET /api/users/mention-search?q= — lightweight autocomplete for @mention
+// dropdowns (rapazzini forum #32). Any logged-in member can query; returns
+// active users only with a small payload. Capped at 8 results so the UI
+// dropdown stays tight and the query stays cheap.
+router.get('/mention-search', requireAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 1) return res.json({ results: [] });
+    if (q.length > 30) return res.status(400).json({ error: 'Query too long' });
+    const like = `${q.replace(/[%_\\]/g, '\\$&')}%`;
+    const [rows] = await pool.execute(
+      `SELECT u.id, u.username, u.display_name, u.discord_username, u.avatar_url, u.\`rank\`,
+              uc_main.character_name AS main_character_name
+       FROM users u
+       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+       WHERE u.status = 'active'
+         AND (
+           u.username LIKE ? OR u.display_name LIKE ? OR u.discord_username LIKE ?
+           OR uc_main.character_name LIKE ?
+         )
+       ORDER BY FIELD(u.\`rank\`, 'guildmaster','officer','veteran','member','recruit'), u.last_login_at DESC
+       LIMIT 8`,
+      [like, like, like, like]
+    );
+    res.json({ results: rows });
+  } catch (err) {
+    console.error('Mention search error:', err);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
 module.exports = router;

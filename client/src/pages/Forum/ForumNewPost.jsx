@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { Alert } from '../../components/ui';
 import MarkdownEditor from '../../components/common/MarkdownEditor';
+import MentionSuggest from '../../components/common/MentionSuggest';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
 import { postUrlFromParts } from '../../utils/forumUrls';
@@ -30,8 +31,15 @@ export default function ForumNewPost() {
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [imagePreview, setImagePreview] = useState(null);
+  // Multi-image attachments (forum #29). imagePreviews is parallel to the
+  // file input's .files list — a data-URL each so the user sees what
+  // they're about to upload before submit.
+  const [imagePreviews, setImagePreviews] = useState([]);
   const imageRef = useRef(null);
+  const MAX_IMAGES = 10;
+  // Optional scheduled publish (forum #39). Officers only. Empty string =
+  // publish immediately; a future datetime hides the post until then.
+  const [publishAt, setPublishAt] = useState('');
 
   useDocumentTitle(category ? `New post in ${category.name} | MDGA` : 'New Post | MDGA');
 
@@ -58,19 +66,21 @@ export default function ForumNewPost() {
   }, [isLoggedIn, apiFetch, slug]);
 
   function handleImageChange() {
-    const file = imageRef.current?.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => setImagePreview(e.target.result);
-      reader.readAsDataURL(file);
-    } else {
-      setImagePreview(null);
+    const files = Array.from(imageRef.current?.files || []).slice(0, MAX_IMAGES);
+    if (files.length === 0) {
+      setImagePreviews([]);
+      return;
     }
+    Promise.all(files.map((file) => new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.readAsDataURL(file);
+    }))).then(setImagePreviews);
   }
 
   function clearImage() {
     if (imageRef.current) imageRef.current.value = '';
-    setImagePreview(null);
+    setImagePreviews([]);
   }
 
   async function handleSubmit(e) {
@@ -86,19 +96,26 @@ export default function ForumNewPost() {
     setSubmitting(true);
     setError('');
     try {
-      let imageUrl = null;
-      const imageFile = imageRef.current?.files[0];
-      if (imageFile) {
+      // Multi-upload: upload each file sequentially (the existing /upload
+      // endpoint accepts one image at a time). Sequential rather than
+      // parallel so we can fail fast on the first bad file and the user
+      // sees one clear error message instead of a stack of toasts.
+      const imageUrls = [];
+      const files = Array.from(imageRef.current?.files || []).slice(0, MAX_IMAGES);
+      for (const file of files) {
         const fd = new FormData();
-        fd.append('image', imageFile);
+        fd.append('image', file);
         const uploadRes = await apiFetch('/upload', { method: 'POST', headers: {}, body: fd });
         if (!uploadRes.ok) {
           const uploadErr = await uploadRes.json().catch(() => ({}));
-          throw new Error(uploadErr.error || 'Image upload failed');
+          throw new Error(uploadErr.error || `Image upload failed for ${file.name}`);
         }
         const uploadData = await uploadRes.json();
-        imageUrl = uploadData.imageUrl;
+        imageUrls.push(uploadData.imageUrl);
       }
+      // The first uploaded image also goes in image_url for legacy clients
+      // (and the search-result preview thumbnail).
+      const imageUrl = imageUrls[0] || null;
 
       // URL param can be numeric id OR slug. Prefer the loaded category's
       // numeric id; fall back to parseInt(slug) only when it cleanly parses
@@ -116,6 +133,8 @@ export default function ForumNewPost() {
           title: title.trim(),
           content: content.trim(),
           imageUrl,
+          imageUrls,
+          publishAt: publishAt && isOfficer() ? new Date(publishAt).toISOString() : undefined,
         }),
       });
       if (!res.ok) {
@@ -235,41 +254,77 @@ export default function ForumNewPost() {
                   </span>
                 </span>
                 <MarkdownEditor
+                  id="forum-newpost-textarea"
                   value={content}
                   onChange={setContent}
-                  placeholder="Share strategy, screenshots, recruiting calls, or just say hi… Markdown supported."
+                  placeholder="Share strategy, screenshots, recruiting calls, or just say hi… Markdown supported. Type @ to mention."
                   rows={12}
+                />
+                <MentionSuggest
+                  textareaId="forum-newpost-textarea"
+                  value={content}
+                  onChange={setContent}
+                  apiFetch={apiFetch}
                 />
               </label>
 
-              {/* Image upload */}
+              {/* Image upload — up to MAX_IMAGES files. Reselecting the
+                  input replaces the entire set (matches native multi-file
+                  picker behavior); per-file remove would require a custom
+                  buffer state we're skipping for now. */}
               <div className={styles.composeUpload}>
-                <span className={styles.composeLabel}>Attach image <span className={styles.composeOptional}>(optional)</span></span>
+                <span className={styles.composeLabel}>
+                  Attach images <span className={styles.composeOptional}>(optional, up to {MAX_IMAGES})</span>
+                </span>
                 <div className={styles.composeUploadRow}>
                   <input
                     ref={imageRef}
                     id="forum-post-image"
                     type="file"
+                    multiple
                     accept="image/jpeg,image/png,image/gif,image/webp"
                     onChange={handleImageChange}
                     className={styles.composeFileInput}
                   />
                   <label htmlFor="forum-post-image" className="btn btn--secondary btn--sm">
-                    {imagePreview ? 'Replace image' : 'Choose image'}
+                    {imagePreviews.length > 0 ? `Replace (${imagePreviews.length} selected)` : 'Choose images'}
                   </label>
-                  {imagePreview && (
+                  {imagePreviews.length > 0 && (
                     <button type="button" className="btn btn--danger btn--sm" onClick={clearImage}>
-                      Remove
+                      Remove all
                     </button>
                   )}
                   <span className={styles.composeUploadHint}>JPG, PNG, GIF, or WebP · auto-compressed to WebP</span>
                 </div>
-                {imagePreview && (
-                  <div className={styles.composePreviewWrap}>
-                    <img src={imagePreview} alt="Preview" className={styles.composePreview} />
+                {imagePreviews.length > 0 && (
+                  <div className={styles.composeGalleryGrid}>
+                    {imagePreviews.map((src, i) => (
+                      <img key={i} src={src} alt={`Preview ${i + 1}`} className={styles.composeGalleryItem} />
+                    ))}
                   </div>
                 )}
               </div>
+
+              {/* Officer-only: schedule the post for a future time. Leaving
+                  blank publishes immediately. */}
+              {isOfficer() && (
+                <label className={styles.composeField}>
+                  <span className={styles.composeLabel}>
+                    Schedule publish <span className={styles.composeOptional}>(officer only, optional)</span>
+                  </span>
+                  <input
+                    type="datetime-local"
+                    value={publishAt}
+                    onChange={(e) => setPublishAt(e.target.value)}
+                    className={styles.composeTextInput}
+                  />
+                  {publishAt && new Date(publishAt) > new Date() && (
+                    <span className={styles.composeUploadHint}>
+                      Will be hidden from members until {new Date(publishAt).toLocaleString()}.
+                    </span>
+                  )}
+                </label>
+              )}
 
               {/* Tips panel */}
               <aside className={styles.composeTips}>

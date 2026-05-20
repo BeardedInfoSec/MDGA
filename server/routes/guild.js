@@ -574,4 +574,38 @@ setTimeout(() => {
   setInterval(autoGuildSync, GUILD_SYNC_INTERVAL);
 }, 2 * 60 * 1000);
 
+// GET /api/guild/membership-events — recent join/leave activity across all
+// federation guilds (rapazzini forum #31). Public read; daily / weekly
+// counts are returned alongside the row list so the frontend can render a
+// "Recent additions" / "Recent subtractions" summary without a second hop.
+router.get('/membership-events', async (req, res) => {
+  try {
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 25;
+    const [events] = await pool.execute(
+      `SELECT gme.id, gme.character_name, gme.realm_slug, gme.event_type, gme.occurred_at,
+              g.name AS guild_name, g.realm_slug AS guild_realm,
+              u.id AS linked_user_id, u.display_name AS linked_display_name, u.username AS linked_username
+       FROM guild_membership_events gme
+       JOIN guilds g ON g.id = gme.guild_id
+       LEFT JOIN user_characters uc ON uc.character_name = gme.character_name AND uc.realm_slug = gme.realm_slug
+       LEFT JOIN users u ON u.id = uc.user_id AND u.status = 'active'
+       ORDER BY gme.occurred_at DESC
+       LIMIT ${limit}`
+    );
+    const [[counts]] = await pool.execute(
+      `SELECT
+        SUM(CASE WHEN event_type = 'joined' AND occurred_at >= NOW() - INTERVAL 1 DAY THEN 1 ELSE 0 END) AS joined_1d,
+        SUM(CASE WHEN event_type = 'left'   AND occurred_at >= NOW() - INTERVAL 1 DAY THEN 1 ELSE 0 END) AS left_1d,
+        SUM(CASE WHEN event_type = 'joined' AND occurred_at >= NOW() - INTERVAL 7 DAY THEN 1 ELSE 0 END) AS joined_7d,
+        SUM(CASE WHEN event_type = 'left'   AND occurred_at >= NOW() - INTERVAL 7 DAY THEN 1 ELSE 0 END) AS left_7d
+       FROM guild_membership_events`
+    );
+    res.json({ events, counts });
+  } catch (err) {
+    console.error('Membership events error:', err);
+    res.status(500).json({ error: 'Failed to load membership events' });
+  }
+});
+
 module.exports = router;

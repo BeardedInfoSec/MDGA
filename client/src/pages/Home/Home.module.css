@@ -299,6 +299,14 @@
 
 .carouselSlide {
   min-width: 100%;
+  position: relative;
+}
+
+.carouselSlideBtn {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: zoom-in;
 }
 
 .carouselSlide img {
@@ -306,6 +314,73 @@
   height: 500px;
   object-fit: cover;
   display: block;
+}
+
+.carouselCaption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-2) var(--space-4);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  pointer-events: none;
+}
+
+.lightboxBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  cursor: zoom-out;
+}
+
+.lightboxClose {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--color-gray-700);
+  color: var(--color-text-primary);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightboxFigure {
+  max-width: 95vw;
+  max-height: 95vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: default;
+}
+
+.lightboxImg {
+  max-width: 100%;
+  max-height: calc(95vh - 60px);
+  object-fit: contain;
+  border-radius: var(--border-radius-sm);
+}
+
+.lightboxCaption {
+  margin-top: var(--space-3);
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  text-align: center;
+  max-width: 80ch;
 }
 
 .carouselBtn {
