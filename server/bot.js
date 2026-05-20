@@ -516,4 +516,30 @@ async function setMemberRoles(discordId, addRoleIds, removeRoleIds) {
   }
 }
 
-module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendOfficerAlert, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
+// ================================================
+// SEND to an arbitrary channel id (used by giveaway announcements, where
+// admins choose between a test channel and the public Events channel).
+// Falls back to OFFICER_CHANNEL_ID when channelId is blank so old configs
+// (no channel persisted) still behave sensibly.
+// ================================================
+async function sendDiscordAnnouncement(channelId, title, description, color = 0xD4AF37) {
+  if (!client || !client.isReady()) return false;
+  const target = String(channelId || '').trim() || OFFICER_CHANNEL_ID;
+  if (!target) return false;
+  try {
+    const channel = await client.channels.fetch(target);
+    if (!channel) return false;
+    const embed = new EmbedBuilder()
+      .setTitle(title)
+      .setDescription(description)
+      .setColor(color)
+      .setTimestamp();
+    await channel.send({ embeds: [embed] });
+    return true;
+  } catch (err) {
+    console.error(`sendDiscordAnnouncement error (channel ${target}):`, err.message);
+    return false;
+  }
+}
+
+module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };

@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
 const { logAdminAction } = require('../services/audit-log');
-const { sendOfficerAlert } = require('../bot');
+const { sendOfficerAlert, sendDiscordAnnouncement } = require('../bot');
 
 const router = express.Router();
 
@@ -591,7 +591,7 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
     // (1) enforce the per-user rate limit before the INSERT, and (2) after
     // the INSERT, see whether this comment hits a winner slot.
     const [giveawayRows] = await pool.execute(
-      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, winners, announced FROM giveaway_configs WHERE post_id = ?',
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, winners, announced FROM giveaway_configs WHERE post_id = ?',
       [postId]
     );
     const giveaway = giveawayRows[0] || null;
@@ -686,7 +686,7 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
   if (dirty) {
     await pool.execute(
       `UPDATE giveaway_configs
-       SET winners = CAST(? AS JSON)
+       SET winners = ?
        WHERE post_id = ?`,
       [JSON.stringify(winners), postId]
     );
@@ -703,7 +703,8 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     const discordTag = author.discord_username ? ` (Discord: ${author.discord_username})` : '';
     const mention = author.discord_id ? ` <@${author.discord_id}>` : '';
     try {
-      await sendOfficerAlert(
+      const sent = await sendDiscordAnnouncement(
+        giveaway.channel_id,
         `Giveaway winner — slot #${win.position}`,
         [
           `**Post:** [#${postId}](https://mdga.gg/forum/post/${postId})`,
@@ -713,14 +714,14 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
         ].join('\n'),
         0xD4AF37
       );
-      announced[key] = 1;
+      if (sent) announced[key] = 1;
     } catch (err) {
       console.error(`Failed to announce giveaway winner for slot ${win.position}:`, err.message);
     }
   }
   if (Object.keys(announced).length > 0) {
     await pool.execute(
-      `UPDATE giveaway_configs SET announced = CAST(? AS JSON) WHERE post_id = ?`,
+      `UPDATE giveaway_configs SET announced = ? WHERE post_id = ?`,
       [JSON.stringify(announced), postId]
     );
   }
@@ -1271,7 +1272,7 @@ router.get('/posts/:id/giveaway', async (req, res) => {
     const postId = parsePostId(req.params.id);
     if (!postId) return res.status(404).json({ error: 'Post not found' });
     const [rows] = await pool.execute(
-      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, winners, announced, created_at, updated_at FROM giveaway_configs WHERE post_id = ?',
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, winners, announced, created_at, updated_at FROM giveaway_configs WHERE post_id = ?',
       [postId]
     );
     if (rows.length === 0) return res.json({ config: null });
@@ -1282,6 +1283,7 @@ router.get('/posts/:id/giveaway', async (req, res) => {
         target_positions: typeof r.target_positions === 'string' ? JSON.parse(r.target_positions) : r.target_positions,
         valid_pattern: r.valid_pattern,
         rate_limit_seconds: r.rate_limit_seconds,
+        channel_id: r.channel_id,
         winners: typeof r.winners === 'string' ? JSON.parse(r.winners) : r.winners,
         announced: typeof r.announced === 'string' ? JSON.parse(r.announced) : r.announced,
         created_at: r.created_at,
@@ -1322,15 +1324,21 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
     }
 
     const rateLimitSeconds = Math.max(0, Math.min(3600, parseInt(req.body.rate_limit_seconds, 10) || 0));
+    // channel_id is the Discord snowflake to post the winner alert to.
+    // Empty / blank means "fall back to officer channel" (handled in
+    // sendDiscordAnnouncement). Limited to digits to avoid bogus values.
+    const rawChannel = String(req.body.channel_id || '').trim();
+    const channelId = /^\d{15,25}$/.test(rawChannel) ? rawChannel : null;
 
     await pool.execute(
-      `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, created_by)
-       VALUES (?, CAST(? AS JSON), ?, ?, ?)
+      `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          target_positions = VALUES(target_positions),
          valid_pattern = VALUES(valid_pattern),
-         rate_limit_seconds = VALUES(rate_limit_seconds)`,
-      [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, req.user.id]
+         rate_limit_seconds = VALUES(rate_limit_seconds),
+         channel_id = VALUES(channel_id)`,
+      [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, channelId, req.user.id]
     );
     res.json({ message: 'Giveaway config saved', target_positions: dedupSorted });
   } catch (err) {

@@ -62,6 +62,7 @@ export default function ForumPost() {
   const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
   const [giveawayPattern, setGiveawayPattern] = useState('^(MDGA|MEGA)!$');
   const [giveawayRateMin, setGiveawayRateMin] = useState('5');
+  const [giveawayChannelId, setGiveawayChannelId] = useState('');
   const [giveawaySaving, setGiveawaySaving] = useState(false);
   const [giveawayError, setGiveawayError] = useState('');
 
@@ -274,10 +275,12 @@ export default function ForumPost() {
           setGiveawayPositions((cfg.target_positions || []).join(', '));
           setGiveawayPattern(cfg.valid_pattern || '^(MDGA|MEGA)!$');
           setGiveawayRateMin(String(Math.round((cfg.rate_limit_seconds || 0) / 60)));
+          setGiveawayChannelId(cfg.channel_id || '');
         } else {
           setGiveawayPositions('1, 100');
           setGiveawayPattern('^(MDGA|MEGA)!$');
           setGiveawayRateMin('5');
+          setGiveawayChannelId('');
         }
       }
     } catch {
@@ -301,6 +304,7 @@ export default function ForumPost() {
           target_positions: positions,
           valid_pattern: giveawayPattern,
           rate_limit_seconds: rateSec,
+          channel_id: giveawayChannelId.trim() || null,
         }),
       });
       if (!res.ok) {
@@ -1033,6 +1037,19 @@ export default function ForumPost() {
                   onChange={(e) => setGiveawayRateMin(e.target.value)}
                   style={{ width: 120, padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
                 />
+              </label>
+              <label style={{ display: 'block', marginBottom: 12 }}>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Discord channel ID (blank = officer channel)</span>
+                <input
+                  type="text"
+                  value={giveawayChannelId}
+                  onChange={(e) => setGiveawayChannelId(e.target.value)}
+                  placeholder="e.g. 1483266989647724758"
+                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-mono, monospace)' }}
+                />
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
+                  Where the bot posts winner alerts. Use a Discord channel snowflake (digits only).
+                </span>
               </label>
               {giveawayConfig?.winners && Object.keys(giveawayConfig.winners).length > 0 && (
                 <div style={{ marginTop: 16, padding: 12, background: 'rgba(212, 175, 55, 0.08)', borderRadius: 'var(--border-radius-sm)' }}>
