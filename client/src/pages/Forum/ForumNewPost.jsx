@@ -23,7 +23,7 @@ const CONTENT_MAX = 10000;
 export default function ForumNewPost() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { isLoggedIn, isOfficer, apiFetch } = useAuth();
+  const { isLoggedIn, isOfficer, hasPermission, apiFetch } = useAuth();
 
   const [allCategories, setAllCategories] = useState([]);
   const [category, setCategory] = useState(null);
@@ -40,6 +40,14 @@ export default function ForumNewPost() {
   // Optional scheduled publish (forum #39). Officers only. Empty string =
   // publish immediately; a future datetime hides the post until then.
   const [publishAt, setPublishAt] = useState('');
+  // Inline giveaway config (forum.manage_giveaway only). When enabled,
+  // the form does a second PUT to /forum/posts/:id/giveaway right after
+  // the create succeeds — same fields the post-detail modal exposes.
+  const [giveawayEnabled, setGiveawayEnabled] = useState(false);
+  const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
+  const [giveawayPattern, setGiveawayPattern] = useState('^(MDGA|MEGA)!$');
+  const [giveawayRateMin, setGiveawayRateMin] = useState('5');
+  const [giveawayChannelId, setGiveawayChannelId] = useState('');
 
   useDocumentTitle(category ? `New post in ${category.name} | MDGA` : 'New Post | MDGA');
 
@@ -142,6 +150,37 @@ export default function ForumNewPost() {
         throw new Error(err.error || 'Failed to create post');
       }
       const data = await res.json();
+
+      // If the author flipped on Giveaway settings, attach the config in
+      // a second request now that the post id exists. A failure here
+      // doesn't roll back the post — we just surface the error so they
+      // can retry from the post detail page's Giveaway button.
+      if (giveawayEnabled && hasPermission('forum.manage_giveaway')) {
+        const positions = giveawayPositions
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => Number.isInteger(n) && n > 0);
+        if (positions.length === 0) {
+          setError('Giveaway needs at least one valid position. Post was created — open it and configure the giveaway from the toolbar.');
+          navigate(postUrlFromParts(data.id, title.trim()));
+          return;
+        }
+        const rateSec = Math.max(0, Math.min(60, parseInt(giveawayRateMin, 10) || 0)) * 60;
+        const gRes = await apiFetch(`/forum/posts/${data.id}/giveaway`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            target_positions: positions,
+            valid_pattern: giveawayPattern,
+            rate_limit_seconds: rateSec,
+            channel_id: giveawayChannelId.trim() || null,
+          }),
+        });
+        if (!gRes.ok) {
+          const gErr = await gRes.json().catch(() => ({}));
+          setError(`Post created, but giveaway config failed: ${gErr.error || 'unknown error'}. Open the post and reconfigure from the toolbar.`);
+        }
+      }
+
       navigate(postUrlFromParts(data.id, title.trim()));
     } catch (err) {
       setError(err.message || 'Something went wrong');
@@ -307,10 +346,10 @@ export default function ForumNewPost() {
 
               {/* Officer-only: schedule the post for a future time. Leaving
                   blank publishes immediately. */}
-              {isOfficer() && (
+              {(isOfficer() || hasPermission('forum.schedule_posts')) && (
                 <label className={styles.composeField}>
                   <span className={styles.composeLabel}>
-                    Schedule publish <span className={styles.composeOptional}>(officer only, optional)</span>
+                    Schedule publish <span className={styles.composeOptional}>(optional)</span>
                   </span>
                   <input
                     type="datetime-local"
@@ -324,6 +363,74 @@ export default function ForumNewPost() {
                     </span>
                   )}
                 </label>
+              )}
+
+              {/* Inline giveaway config (officers / forum.manage_giveaway).
+                  Same fields as the post-detail Giveaway modal; on submit
+                  we attach the config to the new post in a second request
+                  after the create succeeds. */}
+              {(isOfficer() || hasPermission('forum.manage_giveaway')) && (
+                <div className={styles.composeField}>
+                  <label className={styles.composeLabel} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={giveawayEnabled}
+                      onChange={(e) => setGiveawayEnabled(e.target.checked)}
+                    />
+                    <span>Configure as a giveaway <span className={styles.composeOptional}>(first / Nth comment wins, bot announces in Discord)</span></span>
+                  </label>
+                  {giveawayEnabled && (
+                    <div style={{ marginTop: 8, padding: 12, border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', background: 'rgba(212, 175, 55, 0.04)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <label>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Target positions (comma-separated)</span>
+                        <input
+                          type="text"
+                          value={giveawayPositions}
+                          onChange={(e) => setGiveawayPositions(e.target.value)}
+                          placeholder="1, 100"
+                          className={styles.composeTextInput}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Valid pattern (regex)</span>
+                        <input
+                          type="text"
+                          value={giveawayPattern}
+                          onChange={(e) => setGiveawayPattern(e.target.value)}
+                          placeholder="^(MDGA|MEGA)!$"
+                          className={styles.composeTextInput}
+                          style={{ fontFamily: 'var(--font-mono, monospace)' }}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = none)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="60"
+                          value={giveawayRateMin}
+                          onChange={(e) => setGiveawayRateMin(e.target.value)}
+                          className={styles.composeTextInput}
+                          style={{ width: 120 }}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Discord channel ID (blank = officer channel)</span>
+                        <input
+                          type="text"
+                          value={giveawayChannelId}
+                          onChange={(e) => setGiveawayChannelId(e.target.value)}
+                          placeholder="e.g. 1483266989647724758"
+                          className={styles.composeTextInput}
+                          style={{ fontFamily: 'var(--font-mono, monospace)' }}
+                        />
+                        <span className={styles.composeUploadHint}>
+                          Where winners + the "giveaway started" message land. Digits only.
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Tips panel */}
