@@ -431,7 +431,10 @@ export default function Leaderboards() {
                                 <span className={styles.emptyCell}>—</span>
                               )}
                             </td>
-                            <td>{`${entry.class || ''}${getSpec(entry) ? ` — ${getSpec(entry)}` : ''}`}</td>
+                            <td>
+                              {entry.race && <span className={styles.raceTag}>{entry.race}</span>}
+                              {`${entry.class || ''}${getSpec(entry) ? ` — ${getSpec(entry)}` : ''}`}
+                            </td>
                             <td className={styles.rating}>{formatValue(entry)}</td>
                             {isWinRateBracket ? <td>{getWinRate(entry)}</td> : null}
                             <td>

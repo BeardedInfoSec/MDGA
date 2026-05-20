@@ -24,7 +24,7 @@ export default function GuildFlag({ row, guildId, faction, accessor = 'guild', t
   const variant = guildFlagVariant(fac);
   const cls = `${styles.flag} ${variant ? styles[`flag--${variant}`] : ''}`;
   return (
-    <span className={cls} title={title || (label === 'MEGA' ? 'MEGA (Alliance federation)' : `MDGA ${label === 'MDGA' ? 'federation' : `flagship #${label}`}`)}>
+    <span className={cls} title={title || (label === 'MEGA' ? 'MEGA (Alliance federation)' : label === 'MDGA' ? 'MDGA federation (other Horde realm)' : `${label} (flagship Horde realm)`)}>
       {label}
     </span>
   );
