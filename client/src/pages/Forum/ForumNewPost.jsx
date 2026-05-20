@@ -370,17 +370,35 @@ export default function ForumNewPost() {
                   we attach the config to the new post in a second request
                   after the create succeeds. */}
               {(isOfficer() || hasPermission('forum.manage_giveaway')) && (
-                <div className={styles.composeField}>
-                  <label className={styles.composeLabel} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <div
+                  style={{
+                    border: `2px solid ${giveawayEnabled ? 'var(--color-gold)' : 'var(--color-gray-700)'}`,
+                    borderRadius: 'var(--border-radius-sm)',
+                    background: giveawayEnabled ? 'rgba(212, 175, 55, 0.08)' : 'rgba(212, 175, 55, 0.03)',
+                    padding: 16,
+                    transition: 'border-color var(--transition-fast), background var(--transition-fast)',
+                  }}
+                >
+                  <label
+                    style={{ display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer', userSelect: 'none' }}
+                  >
                     <input
                       type="checkbox"
                       checked={giveawayEnabled}
                       onChange={(e) => setGiveawayEnabled(e.target.checked)}
+                      style={{ width: 20, height: 20, accentColor: 'var(--color-gold)', marginTop: 2, flexShrink: 0 }}
                     />
-                    <span>Configure as a giveaway <span className={styles.composeOptional}>(first / Nth comment wins, bot announces in Discord)</span></span>
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontFamily: 'var(--font-display)', fontSize: 18, color: 'var(--color-gold)', letterSpacing: 1 }}>
+                        Run this post as a giveaway
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--color-text-secondary)', fontWeight: 400 }}>
+                        First / Nth comment wins. The bot posts a kickoff message in Discord when you save and announces every winner as slots fill.
+                      </span>
+                    </span>
                   </label>
                   {giveawayEnabled && (
-                    <div style={{ marginTop: 8, padding: 12, border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', background: 'rgba(212, 175, 55, 0.04)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(212, 175, 55, 0.25)', display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <label>
                         <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Target positions (comma-separated)</span>
                         <input
