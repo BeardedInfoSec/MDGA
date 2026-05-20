@@ -522,7 +522,7 @@ async function setMemberRoles(discordId, addRoleIds, removeRoleIds) {
 // Falls back to OFFICER_CHANNEL_ID when channelId is blank so old configs
 // (no channel persisted) still behave sensibly.
 // ================================================
-async function sendDiscordAnnouncement(channelId, title, description, color = 0xD4AF37) {
+async function sendDiscordAnnouncement(channelId, title, description, color = 0xD4AF37, options = {}) {
   if (!client || !client.isReady()) return false;
   const target = String(channelId || '').trim() || OFFICER_CHANNEL_ID;
   if (!target) return false;
@@ -534,6 +534,17 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
       .setDescription(description)
       .setColor(color)
       .setTimestamp();
+    // Optional image (forum giveaway uses the post's first attached image
+    // so members see the prize in Discord without having to click through).
+    // Path is normalized to an absolute https URL because Discord rejects
+    // bare /uploads/... paths.
+    if (options.imageUrl) {
+      const url = String(options.imageUrl).trim();
+      const absolute = /^https?:\/\//i.test(url)
+        ? url
+        : `https://mdga.gg${url.startsWith('/') ? '' : '/'}${url}`;
+      embed.setImage(absolute);
+    }
     await channel.send({ embeds: [embed] });
     return true;
   } catch (err) {

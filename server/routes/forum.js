@@ -669,6 +669,29 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     [postId]
   );
 
+  // Look up the post title (for the friendly URL slug + embed title) and
+  // first attached image (so Discord shows the prize inline, same as the
+  // kickoff message).
+  const [[postMeta]] = await pool.execute(
+    'SELECT title, image_url FROM forum_posts WHERE id = ?',
+    [postId]
+  );
+  const postTitle = postMeta?.title || `#${postId}`;
+  const slug = String(postTitle)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  const postPath = slug ? `${postId}-${slug}` : `${postId}`;
+  let firstImage = postMeta?.image_url || null;
+  const [imgRows] = await pool.execute(
+    'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
+    [postId]
+  );
+  if (imgRows.length > 0) firstImage = imgRows[0].image_url;
+
   let validIdx = 0;
   let dirty = false;
   const newlyAnnounced = [];
@@ -705,14 +728,16 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     try {
       const sent = await sendDiscordAnnouncement(
         giveaway.channel_id,
-        `Giveaway winner — slot #${win.position}`,
+        `Giveaway winner — slot #${win.position}: ${postTitle}`,
         [
-          `**Post:** [#${postId}](https://mdga.gg/forum/post/${postId})`,
-          `**Slot:** ${win.position}`,
           `**Winner:** ${label}${discordTag}${mention}`,
+          `**Slot:** ${win.position}`,
           `**Comment:** ${author.content.slice(0, 200)}`,
+          ``,
+          `https://mdga.gg/forum/post/${postPath}`,
         ].join('\n'),
-        0xD4AF37
+        0xD4AF37,
+        { imageUrl: firstImage }
       );
       if (sent) announced[key] = 1;
     } catch (err) {
@@ -1356,10 +1381,32 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
     // and "slot N filled" in the same conversation.
     if (isNewConfig) {
       const [[postRow]] = await pool.execute(
-        'SELECT id, title FROM forum_posts WHERE id = ?',
+        'SELECT id, title, image_url FROM forum_posts WHERE id = ?',
         [postId]
       );
+      // Pull the first attached image (multi-image table wins; falls back
+      // to the legacy single image_url field). Discord shows it inline.
+      let firstImage = postRow ? postRow.image_url : null;
       if (postRow) {
+        const [imgRows] = await pool.execute(
+          'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
+          [postId]
+        );
+        if (imgRows.length > 0) firstImage = imgRows[0].image_url;
+      }
+      if (postRow) {
+        // Build the friendly /forum/post/<id>-<slug> URL the same way the
+        // frontend does (utils/forumUrls.slugifyTitle) so Discord readers
+        // see "46-mdga-mousepad-drop" instead of a bare "/forum/post/46".
+        const slug = String(postRow.title || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 80);
+        const postPath = slug ? `${postId}-${slug}` : `${postId}`;
+
         // Best-effort: pull literal alternations out of the regex so we
         // can show "MDGA!" / "MEGA!" instead of leaking the raw pattern
         // to non-technical Discord readers. Anything fancier than
@@ -1384,9 +1431,10 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
           [
             `${slotPhrase} ${replyHint}${cooldownNote}`,
             ``,
-            `https://mdga.gg/forum/post/${postId}`,
+            `https://mdga.gg/forum/post/${postPath}`,
           ].join('\n'),
-          0xD4AF37
+          0xD4AF37,
+          { imageUrl: firstImage }
         ).catch((err) => console.error('Giveaway kickoff announcement failed:', err.message)));
       }
     }
