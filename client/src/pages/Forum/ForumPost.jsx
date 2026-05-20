@@ -34,6 +34,12 @@ export default function ForumPost() {
   const [allCategories, setAllCategories] = useState([]);
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
+  const [commentsPagination, setCommentsPagination] = useState(null);
+  const [commentsPage, setCommentsPage] = useState(1);
+  const COMMENTS_PER_PAGE = 25;
+  // Live count polled every 15s while the post is open so the engagement
+  // bar ticks up without a manual reload (helps during giveaways).
+  const [liveCommentCount, setLiveCommentCount] = useState(null);
   const [userVote, setUserVote] = useState(0);
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState('');
@@ -176,7 +182,7 @@ export default function ForumPost() {
   const loadPost = useCallback(async () => {
     if (!id) return;
     try {
-      const path = `/forum/posts/${id}`;
+      const path = `/forum/posts/${id}?comments_page=${commentsPage}&comments_limit=${COMMENTS_PER_PAGE}`;
       const res = isLoggedIn
         ? await apiFetch(path)
         : await fetch(`/api${path}`);
@@ -184,15 +190,50 @@ export default function ForumPost() {
       const data = await res.json();
       setPost(data.post);
       setComments(data.comments || []);
+      setCommentsPagination(data.commentsPagination || null);
+      setLiveCommentCount(data.commentsPagination?.total ?? null);
       setUserVote(data.userVote || 0);
     } catch (err) {
       console.error('Load post error:', err);
     } finally {
       setLoading(false);
     }
-  }, [id, isLoggedIn, apiFetch]);
+  }, [id, isLoggedIn, apiFetch, commentsPage]);
 
   useEffect(() => { loadPost(); }, [loadPost]);
+
+  // Live counter: poll just the count (not the full post payload) every
+  // 15s. We only refresh the visible comments when the user is on the
+  // last page and the count grew — that's the giveaway scenario where
+  // people care about live ticks. Other pages get the new count chip but
+  // not a forced re-fetch.
+  useEffect(() => {
+    if (!post?.id) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const path = `/forum/posts/${id}/stats`;
+        const res = isLoggedIn
+          ? await apiFetch(path)
+          : await fetch(`/api${path}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const total = typeof data.commentCount === 'number' ? data.commentCount : null;
+        if (total == null) return;
+        setLiveCommentCount((prev) => {
+          if (prev === total) return prev;
+          // Auto-refresh if we're on the last page and new comments arrived.
+          const onLastPage = commentsPagination && commentsPagination.page === commentsPagination.pages;
+          if (onLastPage && total > prev) {
+            loadPost();
+          }
+          return total;
+        });
+      } catch (_) { /* ignore transient errors */ }
+    };
+    const interval = setInterval(tick, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [post?.id, id, isLoggedIn, apiFetch, commentsPagination, loadPost]);
 
   // Esc closes the image lightbox (matches Home carousel behavior).
   useEffect(() => {
@@ -466,7 +507,12 @@ export default function ForumPost() {
       if (res.ok) {
         setCommentText('');
         clearCommentImage();
-        loadPost();
+        // Jump to the (likely) last page so the user sees their new
+        // comment in context. Server clamps if our guess is off.
+        const projected = (commentsPagination?.total ?? 0) + 1;
+        const lastPage = Math.max(1, Math.ceil(projected / COMMENTS_PER_PAGE));
+        if (lastPage !== commentsPage) setCommentsPage(lastPage);
+        else loadPost();
       } else {
         const data = await res.json();
         setCommentError(data.error || 'Failed to post reply.');
@@ -739,7 +785,20 @@ export default function ForumPost() {
             <header className={styles.commentsHeader}>
               <span className={styles.forumSectionEyebrow}>Discussion</span>
               <h2 className={styles.forumSectionTitle}>
-                {comments.length} {comments.length === 1 ? 'reply' : 'replies'}
+                {(liveCommentCount ?? commentsPagination?.total ?? comments.length)}{' '}
+                {(liveCommentCount ?? commentsPagination?.total ?? comments.length) === 1 ? 'reply' : 'replies'}
+                {commentsPagination && commentsPagination.pages > 1 && (
+                  <span style={{ marginLeft: 12, fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--color-text-secondary)', fontWeight: 400, letterSpacing: 0, textTransform: 'none' }}>
+                    page {commentsPagination.page} of {commentsPagination.pages}
+                  </span>
+                )}
+                {liveCommentCount != null && commentsPagination && liveCommentCount > commentsPagination.total && (
+                  <button
+                    type="button"
+                    onClick={loadPost}
+                    style={{ marginLeft: 12, background: 'rgba(212,175,55,0.18)', color: 'var(--color-gold)', border: '1px solid var(--color-gold)', borderRadius: 'var(--border-radius-sm)', padding: '4px 12px', fontFamily: 'var(--font-ui)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, cursor: 'pointer' }}
+                  >+{liveCommentCount - commentsPagination.total} new — refresh</button>
+                )}
               </h2>
             </header>
 
@@ -872,6 +931,39 @@ export default function ForumPost() {
                   );
                 })}
               </ul>
+            )}
+            {commentsPagination && commentsPagination.pages > 1 && (
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+                <button
+                  type="button"
+                  disabled={commentsPage <= 1}
+                  onClick={() => setCommentsPage((p) => Math.max(1, p - 1))}
+                  style={{ padding: '6px 14px', background: 'transparent', color: commentsPage <= 1 ? 'var(--color-gray-700)' : 'var(--color-text-secondary)', border: `1px solid ${commentsPage <= 1 ? 'var(--color-gray-800)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, cursor: commentsPage <= 1 ? 'not-allowed' : 'pointer' }}
+                >← Older</button>
+                {Array.from({ length: commentsPagination.pages }, (_, i) => i + 1)
+                  .filter((p) => Math.abs(p - commentsPage) <= 2 || p === 1 || p === commentsPagination.pages)
+                  .reduce((acc, p, i, arr) => {
+                    if (i > 0 && p - arr[i - 1] > 1) acc.push('…');
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) => p === '…' ? (
+                    <span key={`gap-${i}`} style={{ padding: '6px 6px', color: 'var(--color-text-secondary)' }}>…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setCommentsPage(p)}
+                      style={{ padding: '6px 12px', background: p === commentsPage ? 'rgba(212,175,55,0.18)' : 'transparent', color: p === commentsPage ? 'var(--color-gold)' : 'var(--color-text-secondary)', border: `1px solid ${p === commentsPage ? 'var(--color-gold)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                    >{p}</button>
+                  ))}
+                <button
+                  type="button"
+                  disabled={commentsPage >= commentsPagination.pages}
+                  onClick={() => setCommentsPage((p) => Math.min(commentsPagination.pages, p + 1))}
+                  style={{ padding: '6px 14px', background: 'transparent', color: commentsPage >= commentsPagination.pages ? 'var(--color-gray-700)' : 'var(--color-text-secondary)', border: `1px solid ${commentsPage >= commentsPagination.pages ? 'var(--color-gray-800)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, cursor: commentsPage >= commentsPagination.pages ? 'not-allowed' : 'pointer' }}
+                >Newer →</button>
+              </div>
             )}
           </section>
 

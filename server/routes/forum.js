@@ -559,6 +559,21 @@ router.get('/posts/:id', async (req, res) => {
       if (voteRows.length > 0) userVote = voteRows[0].vote;
     }
 
+    // Comment pagination: chronological (slot positions matter), 25 per
+    // page by default, capped at 100. The legacy "?comments_page" param
+    // defaults to 1; old clients that don't paginate still get the first
+    // page (rendering 25 is still cheap). The total count flows back so
+    // the frontend can render a "X of Y" indicator and live-poll.
+    const commentLimit = Math.min(100, Math.max(5, parseInt(req.query.comments_limit, 10) || 25));
+    const commentPageRaw = parseInt(req.query.comments_page, 10);
+    const [[commentCountRow]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM forum_comments WHERE post_id = ? AND deleted_at IS NULL',
+      [postId]
+    );
+    const commentsTotal = commentCountRow.total || 0;
+    const commentsPages = Math.max(1, Math.ceil(commentsTotal / commentLimit));
+    const commentPage = Math.min(commentsPages, Math.max(1, Number.isInteger(commentPageRaw) ? commentPageRaw : 1));
+    const commentOffset = (commentPage - 1) * commentLimit;
     const [comments] = await pool.execute(`
       SELECT fc.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
@@ -588,7 +603,8 @@ router.get('/posts/:id', async (req, res) => {
         ON comment_user_vote.comment_id = fc.id
         AND comment_user_vote.user_id = ?
       WHERE fc.post_id = ? AND fc.deleted_at IS NULL
-      ORDER BY fc.created_at ASC
+      ORDER BY fc.created_at ASC, fc.id ASC
+      LIMIT ${commentLimit} OFFSET ${commentOffset}
     `, [viewerUserId || 0, postId]);
 
     const post = { ...postRows[0] };
@@ -603,12 +619,52 @@ router.get('/posts/:id', async (req, res) => {
     );
     post.images = imgRows.map((r) => r.image_url);
 
-    res.json({ post, comments, userVote });
+    res.json({
+      post,
+      comments,
+      commentsPagination: {
+        page: commentPage,
+        limit: commentLimit,
+        total: commentsTotal,
+        pages: commentsPages,
+      },
+      userVote,
+    });
   } catch (err) {
     console.error('Get post error:', err);
     res.status(500).json({ error: 'Failed to fetch post' });
   }
 });
+// GET /api/forum/posts/:id/stats — lightweight polling endpoint used by
+// the live-counter on the post detail page. Returns just the live
+// comment count + the deleted/published gates so the client can decide
+// whether to re-fetch the full post. Cheap to call every 15s.
+router.get('/posts/:id/stats', async (req, res) => {
+  try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    const [[row]] = await pool.execute(
+      `SELECT
+         fp.id,
+         (SELECT COUNT(*) FROM forum_comments fc
+          WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
+         fp.deleted_at,
+         fp.publish_at
+       FROM forum_posts fp WHERE fp.id = ?`,
+      [postId]
+    );
+    if (!row) return res.status(404).json({ error: 'Post not found' });
+    res.json({
+      commentCount: Number(row.comment_count) || 0,
+      deletedAt: row.deleted_at,
+      publishAt: row.publish_at,
+    });
+  } catch (err) {
+    console.error('Stats endpoint error:', err);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
 // POST /api/forum/posts/:id/comments
 router.post('/posts/:id/comments', requireAuth, async (req, res) => {
   try {
@@ -650,7 +706,7 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
     // (1) enforce the per-user rate limit before the INSERT, and (2) after
     // the INSERT, see whether this comment hits a winner slot.
     const [giveawayRows] = await pool.execute(
-      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, winners, announced FROM giveaway_configs WHERE post_id = ?',
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, winners, announced, almost_announced FROM giveaway_configs WHERE post_id = ?',
       [postId]
     );
     const giveaway = giveawayRows[0] || null;
@@ -713,6 +769,8 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     ? JSON.parse(giveaway.winners) : (giveaway.winners || {});
   const announced = typeof giveaway.announced === 'string'
     ? JSON.parse(giveaway.announced) : (giveaway.announced || {});
+  const almostAnnounced = typeof giveaway.almost_announced === 'string'
+    ? JSON.parse(giveaway.almost_announced) : (giveaway.almost_announced || {});
 
   // Pull every live comment in chronological order with author identity
   // attached so the announcement embed can name the winner properly.
@@ -782,6 +840,22 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     newlyAnnounced.push({ position: validIdx, comment: c });
   }
 
+  // "One to go" hype ping: for each target slot still unfilled, if the
+  // valid counter has reached exactly N-1, fire a Discord heads-up. Only
+  // pings for slots where N >= 3 (otherwise "next valid reply wins slot
+  // 1" is just spam right after kickoff). Tracked in almost_announced so
+  // we send exactly once per slot per drop.
+  const almostNew = [];
+  for (const target of targets) {
+    if (target < 3) continue;
+    if (winners[String(target)]) continue;
+    if (almostAnnounced[String(target)]) continue;
+    if (validIdx >= target - 1) {
+      almostAnnounced[String(target)] = 1;
+      almostNew.push(target);
+    }
+  }
+
   if (dirty) {
     await pool.execute(
       `UPDATE giveaway_configs
@@ -824,6 +898,37 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
     await pool.execute(
       `UPDATE giveaway_configs SET announced = ? WHERE post_id = ?`,
       [JSON.stringify(announced), postId]
+    );
+  }
+
+  // Fire the one-to-go pings (separate loop so they land AFTER any winner
+  // alert from this same scan — natural sequence in Discord).
+  for (const target of almostNew) {
+    try {
+      const sent = await sendDiscordAnnouncement(
+        giveaway.channel_id,
+        `One to go: ${postTitle}`,
+        [
+          `Next valid reply takes **slot #${target}**.`,
+          ``,
+          postUrl,
+        ].join('\n'),
+        0xB91C1C,
+        { imageUrls: postImages, galleryUrl: postUrl }
+      );
+      if (!sent) {
+        // Bot couldn't post — un-mark so we retry on the next comment.
+        delete almostAnnounced[String(target)];
+      }
+    } catch (err) {
+      console.error(`Failed to announce one-to-go for slot ${target}:`, err.message);
+      delete almostAnnounced[String(target)];
+    }
+  }
+  if (almostNew.length > 0) {
+    await pool.execute(
+      `UPDATE giveaway_configs SET almost_announced = ? WHERE post_id = ?`,
+      [JSON.stringify(almostAnnounced), postId]
     );
   }
 }
@@ -1220,7 +1325,7 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
       // against the new publish moment. (No-op if no giveaway config.)
       await pool.execute(
         `UPDATE giveaway_configs
-         SET kickoff_announced_at = NULL, warnings_sent = JSON_OBJECT()
+         SET kickoff_announced_at = NULL, warnings_sent = JSON_OBJECT(), almost_announced = JSON_OBJECT()
          WHERE post_id = ?`,
         [id]
       );
