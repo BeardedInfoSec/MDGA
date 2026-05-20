@@ -145,20 +145,38 @@ router.get('/', optionalAuth, async (req, res) => {
     // Strip Discord-derived identity fields for anonymous visitors. Keeps
     // character + class/spec + rating visible (the public-interest data),
     // but hides who the human behind the toon is until the visitor logs in.
-    const sanitizedEntries = isAuthed
-      ? entries
-      : entries.map((e) => ({
-          ...e,
-          user_id: null,
-          display_name: null,
-          username: null,
-          discord_username: null,
-          avatar_url: null,
-          user_rank: null,
-          user_display_rank: null,
-        }));
+    const stripIdentity = (e) => ({
+      ...e,
+      user_id: null,
+      display_name: null,
+      username: null,
+      discord_username: null,
+      avatar_url: null,
+      user_rank: null,
+      user_display_rank: null,
+    });
+    const sanitizedEntries = isAuthed ? entries : entries.map(stripIdentity);
 
-    res.json({ entries: sanitizedEntries, bracket, total: countRow.total, page, pageSize, q, sortBy, sortDir: sortDir.toLowerCase(), isAuthed });
+    // Bracket leader, independent of the user's current page / sort / search.
+    // Returned alongside the page so the "Top X" stat card stays correct when
+    // the user is on page 2+, filtering, or has sorted by a non-rank column.
+    const [leaderRows] = await pool.execute(
+      `SELECT gm.character_name, gm.realm_slug, gm.class, gm.spec,
+              gms.${bracket} AS value,
+              u.id AS user_id, u.display_name, u.username, u.discord_username, u.avatar_url
+       FROM guild_members gm
+       JOIN guilds g ON g.id = gm.guild_id
+       INNER JOIN guild_member_stats gms ON gms.guild_member_id = gm.id
+       LEFT JOIN users u ON u.id = gm.linked_user_id
+       WHERE gms.${bracket} > 0
+       ORDER BY gms.${bracket} DESC, gm.character_name ASC
+       LIMIT 1`
+    );
+    const topEntry = leaderRows[0]
+      ? (isAuthed ? leaderRows[0] : stripIdentity(leaderRows[0]))
+      : null;
+
+    res.json({ entries: sanitizedEntries, topEntry, bracket, total: countRow.total, page, pageSize, q, sortBy, sortDir: sortDir.toLowerCase(), isAuthed });
   } catch (err) {
     console.error('Get leaderboard error:', err);
     res.status(500).json({ error: 'Failed to fetch leaderboard' });

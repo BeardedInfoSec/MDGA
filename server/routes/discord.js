@@ -15,7 +15,18 @@ const router = express.Router();
 const DISCORD_API = 'https://discord.com/api/v10';
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+// Single redirect_uri registered with Discord — the callback always lands on
+// mdga.gg. We then hop the browser back to the originating host (mdga.dev
+// in particular) by storing the request host in pendingStates.
 const REDIRECT_URI = 'https://mdga.gg/api/auth/discord/callback';
+const ALLOWED_RETURN_HOSTS = new Set(['mdga.gg', 'mdga.dev']);
+
+function getRequestHost(req) {
+  // trust proxy is on (set in server/index.js) so X-Forwarded-Host is honored
+  // by req.hostname. Fall back to the Host header and finally to mdga.gg.
+  const candidate = (req.hostname || req.get('host') || '').toLowerCase().split(':')[0];
+  return ALLOWED_RETURN_HOSTS.has(candidate) ? candidate : 'mdga.gg';
+}
 
 // In-memory state store for CSRF protection
 // Map<stateToken, { from, createdAt }>
@@ -85,8 +96,9 @@ router.get('/', (req, res) => {
   const state = crypto.randomBytes(20).toString('hex');
   const from = req.query.from || 'login';
   const appId = req.query.appId ? parseInt(req.query.appId, 10) : null;
+  const returnHost = getRequestHost(req);
 
-  pendingStates.set(state, { from, appId, createdAt: Date.now() });
+  pendingStates.set(state, { from, appId, returnHost, createdAt: Date.now() });
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -118,11 +130,16 @@ router.get('/callback', async (req, res) => {
     return res.redirect('/login/?error=invalid_state');
   }
 
-  const { from, appId } = pendingStates.get(state);
+  const { from, appId, returnHost } = pendingStates.get(state);
   pendingStates.delete(state);
 
-  // Determine redirect base based on origin
-  const redirectBase = from === 'join' ? '/join/' : '/login/';
+  // Determine redirect base based on origin. Prefix with the originating host
+  // (mdga.dev vs. mdga.gg) so a user who started on mdga.dev lands back on
+  // mdga.dev with the grant code — not on mdga.gg, where the callback ran.
+  const path = from === 'join' ? '/join/' : '/login/';
+  const redirectBase = returnHost && returnHost !== 'mdga.gg'
+    ? `https://${returnHost}${path}`
+    : path;
 
   if (!code) {
     return res.redirect(`${redirectBase}?error=discord_error`);

@@ -28,6 +28,7 @@ export default function Leaderboards() {
 
   const [bracket, setBracket] = useState('solo_shuffle');
   const [entries, setEntries] = useState([]);
+  const [topEntry, setTopEntry] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -73,13 +74,16 @@ export default function Leaderboards() {
       if (res.ok) {
         const data = await res.json();
         setEntries(data.entries || []);
+        setTopEntry(data.topEntry || null);
         setTotal(data.total || 0);
       } else {
         setEntries([]);
+        setTopEntry(null);
         setTotal(0);
       }
     } catch {
       setEntries([]);
+      setTopEntry(null);
       setTotal(0);
     } finally {
       setLoading(false);
@@ -194,12 +198,12 @@ export default function Leaderboards() {
 
   const fmt = (v) => (v || 0).toLocaleString();
 
-  // Title band stats — derived from the current view + bracket totals.
-  // "Top X" always pulls the actual bracket leader (leaderboard_rank === 1),
-  // not the first row of whatever sort the user has applied.
+  // Title band stats — derived from server-supplied bracket totals + leader.
+  // "Top X" uses the server-returned topEntry (the absolute rank-1 row for
+  // this bracket), so it stays correct on page 2+, with filters, or when
+  // the user has sorted by a non-rank column.
   const stats = useMemo(() => {
-    const leader = entries.find((e) => e.leaderboard_rank === 1) || null;
-    const topRaw = leader ? (leader[bracket] || 0) : 0;
+    const topRaw = topEntry ? (topEntry.value || 0) : 0;
     const topDisplay = topRaw
       ? (FORMAT_NUMBER.has(bracket) ? topRaw.toLocaleString() : String(topRaw))
       : '—';
@@ -209,7 +213,7 @@ export default function Leaderboards() {
       { value: String(ALL_BRACKETS.length), label: 'Brackets' },
       { value: refreshing ? 'Refreshing…' : 'Live', label: 'Status' },
     ];
-  }, [entries, bracket, total, refreshing]);
+  }, [topEntry, bracket, total, refreshing]);
 
   const renderExpandedRow = (entry, colSpan) => {
     const arenaWinRate = entry.arenas_played > 0
