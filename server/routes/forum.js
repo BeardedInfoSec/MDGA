@@ -56,6 +56,7 @@ router.get('/categories', async (req, res) => {
     // adds new columns doesn't get masked by mysql2's prepared-statement
     // metadata cache — added columns silently disappear from API responses
     // until the cache invalidates. Bit me on migration-044.
+    const viewerIdForQuery = viewer ? viewer.id : 0;
     const [categories] = await pool.execute(`
       SELECT
         fc.id, fc.name, fc.description, fc.sort_order, fc.created_by, fc.created_at,
@@ -63,11 +64,25 @@ router.get('/categories', async (req, res) => {
         LOWER(REGEXP_REPLACE(REGEXP_REPLACE(fc.name, '[^A-Za-z0-9 -]', ''), ' +', '-')) AS slug,
         (SELECT COUNT(*) FROM forum_posts fp WHERE fp.category_id = fc.id AND fp.deleted_at IS NULL) AS post_count,
         (SELECT fp2.title FROM forum_posts fp2 WHERE fp2.category_id = fc.id AND fp2.deleted_at IS NULL ORDER BY fp2.created_at DESC LIMIT 1) AS latest_post_title,
-        (SELECT fp3.created_at FROM forum_posts fp3 WHERE fp3.category_id = fc.id AND fp3.deleted_at IS NULL ORDER BY fp3.created_at DESC LIMIT 1) AS latest_post_date
+        (SELECT fp3.created_at FROM forum_posts fp3 WHERE fp3.category_id = fc.id AND fp3.deleted_at IS NULL ORDER BY fp3.created_at DESC LIMIT 1) AS latest_post_date,
+        CASE WHEN ? = 0 THEN 0 ELSE (
+          SELECT COUNT(*)
+          FROM forum_posts fp4
+          LEFT JOIN forum_post_views fpv ON fpv.post_id = fp4.id AND fpv.user_id = ?
+          WHERE fp4.category_id = fc.id
+            AND fp4.deleted_at IS NULL
+            AND (
+              fpv.viewed_at IS NULL
+              OR fpv.viewed_at < GREATEST(
+                fp4.updated_at,
+                COALESCE((SELECT MAX(fc2.created_at) FROM forum_comments fc2 WHERE fc2.post_id = fp4.id AND fc2.deleted_at IS NULL), fp4.updated_at)
+              )
+            )
+        ) END AS unread_count
       FROM forum_categories fc
       ${whereClause}
       ORDER BY fc.sort_order ASC
-    `);
+    `, [viewerIdForQuery, viewerIdForQuery]);
     res.json({ categories });
   } catch (err) {
     console.error('Get categories error:', err);
@@ -268,6 +283,10 @@ router.get('/categories/:id/posts', async (req, res) => {
       orderClause = 'fp.pinned DESC, (LOG10(GREATEST(ABS(COALESCE(vote_sum.net_votes, 0)) + 1, 1)) + UNIX_TIMESTAMP(fp.created_at) / 45000) DESC';
     }
 
+    // last_activity = newest of post.updated_at and the most recent live
+    // comment. is_unread compares that to the viewer's recorded view time.
+    // Anonymous viewers always see is_unread = 0 (no per-user tracking).
+    const viewerIdForQuery = viewer ? viewer.id : 0;
     const [posts] = await pool.execute(`
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
@@ -276,7 +295,20 @@ router.get('/categories/:id/posts', async (req, res) => {
         (SELECT COUNT(*) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL) AS comment_count,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         COALESCE(vote_sum.upvotes, 0) AS upvotes,
-        COALESCE(vote_sum.downvotes, 0) AS downvotes
+        COALESCE(vote_sum.downvotes, 0) AS downvotes,
+        GREATEST(
+          fp.updated_at,
+          COALESCE((SELECT MAX(fc.created_at) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL), fp.updated_at)
+        ) AS last_activity_at,
+        CASE
+          WHEN ? = 0 THEN 0
+          WHEN view_row.viewed_at IS NULL THEN 1
+          WHEN view_row.viewed_at < GREATEST(
+            fp.updated_at,
+            COALESCE((SELECT MAX(fc.created_at) FROM forum_comments fc WHERE fc.post_id = fp.id AND fc.deleted_at IS NULL), fp.updated_at)
+          ) THEN 1
+          ELSE 0
+        END AS is_unread
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
@@ -287,10 +319,11 @@ router.get('/categories/:id/posts', async (req, res) => {
           SUM(CASE WHEN vote = -1 THEN 1 ELSE 0 END) AS downvotes
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
+      LEFT JOIN forum_post_views view_row ON view_row.post_id = fp.id AND view_row.user_id = ?
       WHERE fp.category_id = ? AND fp.deleted_at IS NULL
       ORDER BY ${orderClause}
       LIMIT ${limit} OFFSET ${offset}
-    `, [resolvedCategoryId]);
+    `, [viewerIdForQuery, viewerIdForQuery, resolvedCategoryId]);
 
     const [countResult] = await pool.execute(
       'SELECT COUNT(*) AS total FROM forum_posts WHERE category_id = ? AND deleted_at IS NULL',
@@ -376,7 +409,8 @@ router.get('/posts/:id', async (req, res) => {
         fc_cat.name AS category_name,
         COALESCE(vote_sum.net_votes, 0) AS net_votes,
         COALESCE(vote_sum.upvotes, 0) AS upvotes,
-        COALESCE(vote_sum.downvotes, 0) AS downvotes
+        COALESCE(vote_sum.downvotes, 0) AS downvotes,
+        (SELECT COUNT(*) FROM forum_post_revisions fpr WHERE fpr.post_id = fp.id) AS revision_count
       FROM forum_posts fp
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
@@ -398,13 +432,18 @@ router.get('/posts/:id', async (req, res) => {
       return res.status(403).json({ error: 'You do not have access to this post' });
     }
 
-    // Record unique view if logged in (INSERT IGNORE skips duplicates)
+    // Track view per (post, user) so we can compute unread state on the
+    // index. INSERT bumps view_count on first view; ON DUPLICATE UPDATE
+    // refreshes viewed_at so a revisit clears the unread flag.
     if (viewerUserId) {
       const [viewResult] = await pool.execute(
-        'INSERT IGNORE INTO forum_post_views (post_id, user_id) VALUES (?, ?)',
+        `INSERT INTO forum_post_views (post_id, user_id) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE viewed_at = CURRENT_TIMESTAMP`,
         [postId, viewerUserId]
       );
-      if (viewResult.affectedRows > 0) {
+      // mysql2 returns affectedRows=1 on insert, 2 on update (because of the
+      // ON DUPLICATE clause). Only the insert bumps the public view counter.
+      if (viewResult.affectedRows === 1) {
         await pool.execute('UPDATE forum_posts SET view_count = view_count + 1 WHERE id = ?', [postId]);
       }
     }
@@ -426,7 +465,8 @@ router.get('/posts/:id', async (req, res) => {
         COALESCE(comment_vote_sum.net_votes, 0) AS net_votes,
         COALESCE(comment_vote_sum.upvotes, 0) AS upvotes,
         COALESCE(comment_vote_sum.downvotes, 0) AS downvotes,
-        COALESCE(comment_user_vote.vote, 0) AS user_vote
+        COALESCE(comment_user_vote.vote, 0) AS user_vote,
+        (SELECT COUNT(*) FROM forum_comment_revisions fcr WHERE fcr.comment_id = fc.id) AS revision_count
       FROM forum_comments fc
       JOIN users u ON fc.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
@@ -852,10 +892,86 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
   }
 });
 
+// PUT /api/forum/comments/:id — edit a reply. Author can edit their own;
+// users with forum.delete_any_comment can edit anyone's. Each edit snapshots
+// the previous content into forum_comment_revisions so officers can audit.
+router.put('/comments/:id', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid comment id' });
+
+    const [[existing]] = await pool.execute(
+      'SELECT id, user_id, content FROM forum_comments WHERE id = ? AND deleted_at IS NULL',
+      [id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Comment not found' });
+
+    const isOwner = existing.user_id === req.user.id;
+    const canEditAny = req.user.rank === 'guildmaster' ||
+      (req.user.permissions && req.user.permissions.includes('forum.delete_any_comment'));
+    if (!isOwner && !canEditAny) return res.status(403).json({ error: 'Not authorized' });
+
+    // Match the post-edit cleanup rules: strip control chars but preserve
+    // tabs/newlines so paragraphs survive the round-trip.
+    const CONTENT_CTRL_RE = new RegExp('[ --]', 'g');
+    const cleanContent = String(req.body.content ?? existing.content).replace(CONTENT_CTRL_RE, '').trim();
+    if (!cleanContent) return res.status(400).json({ error: 'Content is required' });
+    if (cleanContent === existing.content) return res.json({ message: 'No changes' });
+
+    await pool.execute(
+      'INSERT INTO forum_comment_revisions (comment_id, edited_by, previous_content) VALUES (?, ?, ?)',
+      [id, req.user.id, existing.content]
+    );
+    await pool.execute(
+      'UPDATE forum_comments SET content = ?, updated_at = NOW() WHERE id = ?',
+      [cleanContent, id]
+    );
+
+    if (!isOwner) {
+      logAdminAction({
+        adminUserId: req.user.id, actionType: 'comment.edit',
+        targetType: 'forum_comment', targetId: id,
+        summary: `Edited comment #${id}`,
+      });
+    }
+    res.json({ message: 'Comment updated' });
+  } catch (err) {
+    console.error('Edit comment error:', err);
+    res.status(500).json({ error: 'Failed to update comment' });
+  }
+});
+
+// GET /api/forum/comments/:id/revisions — officer-only audit of a comment's
+// edit history. Mirrors the post equivalent under /api/admin.
+router.get('/comments/:id/revisions', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid comment id' });
+    const isOfficer = ['officer', 'guildmaster'].includes(req.user.rank) ||
+      (req.user.permissions && req.user.permissions.includes('forum.delete_any_comment'));
+    if (!isOfficer) return res.status(403).json({ error: 'Not authorized' });
+    const [rows] = await pool.execute(
+      `SELECT r.id, r.comment_id, r.edited_by, r.previous_content, r.edited_at,
+              u.username, u.display_name
+       FROM forum_comment_revisions r
+       LEFT JOIN users u ON u.id = r.edited_by
+       WHERE r.comment_id = ?
+       ORDER BY r.edited_at DESC`,
+      [id]
+    );
+    res.json({ revisions: rows });
+  } catch (err) {
+    console.error('Get comment revisions error:', err);
+    res.status(500).json({ error: 'Failed to load revisions' });
+  }
+});
+
 // PUT /api/forum/posts/:id/pin
 router.put('/posts/:id/pin', requireAuth, requirePermission('forum.pin_posts'), async (req, res) => {
   try {
-    await pool.execute('UPDATE forum_posts SET pinned = NOT pinned WHERE id = ?', [req.params.id]);
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    await pool.execute('UPDATE forum_posts SET pinned = NOT pinned WHERE id = ?', [postId]);
     res.json({ message: 'Pin toggled' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to toggle pin' });
@@ -865,7 +981,9 @@ router.put('/posts/:id/pin', requireAuth, requirePermission('forum.pin_posts'), 
 // PUT /api/forum/posts/:id/lock
 router.put('/posts/:id/lock', requireAuth, requirePermission('forum.lock_posts'), async (req, res) => {
   try {
-    await pool.execute('UPDATE forum_posts SET locked = NOT locked WHERE id = ?', [req.params.id]);
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    await pool.execute('UPDATE forum_posts SET locked = NOT locked WHERE id = ?', [postId]);
     res.json({ message: 'Lock toggled' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to toggle lock' });

@@ -28,12 +28,14 @@ router.get('/', requireAuth, async (req, res) => {
           fp.content,
           fc.name AS category_name,
           fc.age_restricted AS category_age_restricted,
-          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
+          u.username, u.display_name, u.discord_username, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
+          uc_main.character_name AS main_character_name,
           (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id AND fc2.deleted_at IS NULL) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes
         FROM forum_posts fp
         JOIN forum_categories fc ON fc.id = fp.category_id
         JOIN users u ON u.id = fp.user_id
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
         WHERE fc.officer_only = 0 AND fp.deleted_at IS NULL
         ORDER BY fp.created_at DESC
         LIMIT 20
@@ -53,13 +55,15 @@ router.get('/', requireAuth, async (req, res) => {
       `, [userId]),
       pool.execute(`
         SELECT fp.id, fp.title, fp.created_at, fp.content,
-          u.username, u.display_name, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
+          u.username, u.display_name, u.discord_username, u.avatar_url, u.\`rank\` AS user_rank, u.display_rank AS user_display_rank,
+          uc_main.character_name AS main_character_name,
           (SELECT COUNT(*) FROM forum_comments fc2 WHERE fc2.post_id = fp.id AND fc2.deleted_at IS NULL) AS comment_count,
           (SELECT COALESCE(SUM(vote), 0) FROM forum_votes fv WHERE fv.post_id = fp.id) AS net_votes,
           fp.view_count
         FROM forum_posts fp
         JOIN forum_categories fc ON fc.id = fp.category_id
         JOIN users u ON u.id = fp.user_id
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
         WHERE fc.name = 'Guild Announcements' AND fp.deleted_at IS NULL
         ORDER BY fp.created_at DESC
         LIMIT 5

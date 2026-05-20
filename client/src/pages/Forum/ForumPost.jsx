@@ -43,6 +43,15 @@ export default function ForumPost() {
   const [editContent, setEditContent] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  // Per-comment edit state. Keyed by comment id so multiple inline editors
+  // could theoretically be open at once, but in practice only one is shown.
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editingCommentText, setEditingCommentText] = useState('');
+  const [editingCommentSaving, setEditingCommentSaving] = useState(false);
+  const [editingCommentError, setEditingCommentError] = useState('');
+  // Comment revisions modal (officer view of a single reply's edit history).
+  const [commentRevisionsId, setCommentRevisionsId] = useState(null);
+  const [commentRevisions, setCommentRevisions] = useState(null);
 
   const openEditPost = () => {
     if (!post) return;
@@ -169,6 +178,83 @@ export default function ForumPost() {
   async function handleToggleLock() {
     try { const res = await apiFetch(`/forum/posts/${id}/lock`, { method: 'PUT' }); if (res.ok) loadPost(); }
     catch { alert('Failed to toggle lock'); }
+  }
+
+  function startEditComment(c) {
+    setEditingCommentId(c.id);
+    setEditingCommentText(c.content || '');
+    setEditingCommentError('');
+  }
+
+  function cancelEditComment() {
+    setEditingCommentId(null);
+    setEditingCommentText('');
+    setEditingCommentError('');
+  }
+
+  async function submitEditComment() {
+    if (!editingCommentText.trim()) {
+      setEditingCommentError('Reply content is required.');
+      return;
+    }
+    setEditingCommentSaving(true);
+    setEditingCommentError('');
+    try {
+      const res = await apiFetch(`/forum/comments/${editingCommentId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: editingCommentText.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setEditingCommentError(data.error || 'Failed to save.');
+        return;
+      }
+      cancelEditComment();
+      loadPost();
+    } catch {
+      setEditingCommentError('Failed to save.');
+    } finally {
+      setEditingCommentSaving(false);
+    }
+  }
+
+  // Build a markdown blockquote of the source text + a citation header so
+  // the reply shows "@author wrote:" above an indented quote. Inserts at the
+  // current caret if the textarea is focused, otherwise appends.
+  function quoteIntoReply(authorLabel, sourceText) {
+    const quoted = String(sourceText || '')
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    const block = `> **${authorLabel} wrote:**\n${quoted}\n\n`;
+    setCommentText((prev) => (prev ? `${prev.replace(/\s*$/, '')}\n\n${block}` : block));
+    // Focus + scroll on the next tick so React has rendered the updated value.
+    // We look up the textarea by id (set on the reply MarkdownEditor) rather
+    // than threading a ref through the editor component.
+    setTimeout(() => {
+      const ta = document.getElementById('forum-reply-textarea');
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 0);
+  }
+
+  async function openCommentRevisions(commentId) {
+    setCommentRevisionsId(commentId);
+    setCommentRevisions(null);
+    try {
+      const res = await apiFetch(`/forum/comments/${commentId}/revisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setCommentRevisions(data.revisions || []);
+      } else {
+        setCommentRevisions([]);
+      }
+    } catch {
+      setCommentRevisions([]);
+    }
   }
 
   async function handleDeleteComment(commentId) {
@@ -432,6 +518,14 @@ export default function ForumPost() {
               </div>
               <div className={styles.postEngagementActions}>
                 <button type="button" className="btn btn--secondary btn--sm" onClick={handleSharePost}>Share</button>
+                {!post.locked && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => quoteIntoReply(displayName, post.content || '')}
+                    title="Quote into a reply"
+                  >Quote</button>
+                )}
                 {!isAuthor && (
                   <button type="button" className="btn btn--secondary btn--sm" onClick={handleReportPost}>Report</button>
                 )}
@@ -452,8 +546,13 @@ export default function ForumPost() {
                     <button type="button" className="btn btn--secondary btn--sm" onClick={handleToggleLock}>
                       {post.locked ? 'Unlock' : 'Lock'}
                     </button>
-                    <button type="button" className="btn btn--secondary btn--sm" onClick={() => setShowRevisions(true)}>
-                      Revisions
+                    <button
+                      type="button"
+                      className={`btn btn--secondary btn--sm ${post.revision_count > 0 ? styles.revisionsBtnHasEdits : ''}`}
+                      onClick={() => setShowRevisions(true)}
+                      title={post.revision_count > 0 ? `${post.revision_count} prior edit${post.revision_count === 1 ? '' : 's'}` : 'No edits yet'}
+                    >
+                      Revisions{post.revision_count > 0 ? ` (${post.revision_count})` : ''}
                     </button>
                   </>
                 )}
@@ -521,7 +620,36 @@ export default function ForumPost() {
                             >Armory</a>
                           )}
                           <span className={styles.commentDate}>· {timeAgo(c.created_at)}</span>
+                          {c.revision_count > 0 && (
+                            <span
+                              className={styles.commentEditedBadge}
+                              title={`Edited ${c.revision_count} time${c.revision_count === 1 ? '' : 's'}`}
+                            >· edited</span>
+                          )}
                           <span className={styles.commentActions}>
+                            {!post.locked && (
+                              <button
+                                type="button"
+                                className={styles.commentActionLink}
+                                onClick={() => quoteIntoReply(cName, c.content || '')}
+                                title="Quote into a reply"
+                              >Quote</button>
+                            )}
+                            {(cIsAuthor || showOfficerActions) && !post.locked && (
+                              <button
+                                type="button"
+                                className={styles.commentActionLink}
+                                onClick={() => startEditComment(c)}
+                              >Edit</button>
+                            )}
+                            {showOfficerActions && c.revision_count > 0 && (
+                              <button
+                                type="button"
+                                className={`${styles.commentActionLink} ${styles.commentActionLinkAccent}`}
+                                onClick={() => openCommentRevisions(c.id)}
+                                title="View edit history"
+                              >Revisions ({c.revision_count})</button>
+                            )}
                             {!cIsAuthor && (
                               <button
                                 type="button"
@@ -538,9 +666,32 @@ export default function ForumPost() {
                             )}
                           </span>
                         </div>
-                        <MarkdownContent source={c.content} className={styles.commentText} />
-                        {c.image_url && (
-                          <img src={c.image_url} alt="Reply" className={styles.commentImageInline} />
+                        {editingCommentId === c.id ? (
+                          <div className={styles.commentEditForm}>
+                            <MarkdownEditor
+                              value={editingCommentText}
+                              onChange={setEditingCommentText}
+                              rows={5}
+                              maxLength={REPLY_MAX + 100}
+                            />
+                            {editingCommentError && <Alert tone="error">{editingCommentError}</Alert>}
+                            <div className={styles.commentEditActions}>
+                              <button type="button" className="btn btn--secondary btn--sm" onClick={cancelEditComment}>Cancel</button>
+                              <button
+                                type="button"
+                                className="btn btn--primary btn--sm"
+                                onClick={submitEditComment}
+                                disabled={editingCommentSaving || !editingCommentText.trim()}
+                              >{editingCommentSaving ? 'Saving…' : 'Save'}</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <MarkdownContent source={c.content} className={styles.commentText} />
+                            {c.image_url && (
+                              <img src={c.image_url} alt="Reply" className={styles.commentImageInline} />
+                            )}
+                          </>
                         )}
                       </div>
                     </li>
@@ -580,6 +731,7 @@ export default function ForumPost() {
                     </span>
                   </span>
                   <MarkdownEditor
+                    id="forum-reply-textarea"
                     value={commentText}
                     onChange={setCommentText}
                     placeholder="Write your reply… Markdown supported."
@@ -660,6 +812,35 @@ export default function ForumPost() {
                   {editSaving ? 'Saving…' : 'Save changes'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {commentRevisionsId !== null && (
+        <div className={styles.revisionsBackdrop} onClick={() => setCommentRevisionsId(null)} role="dialog" aria-modal="true">
+          <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
+            <header className={styles.revisionsHeader}>
+              <h2>Edit history — reply #{commentRevisionsId}</h2>
+              <button type="button" onClick={() => setCommentRevisionsId(null)} className={styles.revisionsClose} aria-label="Close">×</button>
+            </header>
+            <div className={styles.revisionsBody}>
+              {commentRevisions === null ? (
+                <p>Loading…</p>
+              ) : commentRevisions.length === 0 ? (
+                <p>No prior revisions.</p>
+              ) : (
+                <ol className={styles.revisionsList}>
+                  {commentRevisions.map((r) => (
+                    <li key={r.id} className={styles.revisionItem}>
+                      <div className={styles.revisionMeta}>
+                        Edited {new Date(r.edited_at).toLocaleString()} by {r.display_name || r.username || `user #${r.edited_by}`}
+                      </div>
+                      <pre className={styles.revisionContent}>{r.previous_content || ''}</pre>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         </div>

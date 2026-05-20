@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { primaryName, secondaryName } from '../../utils/userDisplay';
 import styles from './Nav.module.css';
 
 export default function Nav() {
@@ -116,7 +117,10 @@ export default function Nav() {
                 aria-expanded={userOpen}
               >
                 <span className={`rank-badge rank-badge--${user.rank}`}>{user.displayRank || user.display_rank || user.rank}</span>
-                {user.displayName || user.display_name || user.username}
+                {primaryName(user)}
+                {secondaryName(user) && (
+                  <span className={styles.userBtnSecondary}> ({secondaryName(user)})</span>
+                )}
               </button>
               <div className={`${styles.userDropdown} ${userOpen ? styles.userDropdownVisible : ''}`}>
                 <Link to="/profile" className={styles.dropdownItem}>Profile</Link>

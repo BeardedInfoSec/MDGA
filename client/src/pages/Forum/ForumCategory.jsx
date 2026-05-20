@@ -216,6 +216,7 @@ export default function ForumCategory() {
                 return (
                   <Link key={post.id} to={postUrl(post)} className={cls}>
                     <div className={styles.forumPostTitle}>
+                      {post.is_unread ? <span className={styles.forumUnreadDot} aria-label="Unread" title="New since your last visit" /> : null}
                       {cleanForumTitle(post.title)}
                       {post.pinned ? <span className={styles.forumPostTagPinned}>Pinned</span> : null}
                       {post.locked ? <span className={styles.forumPostTagLocked}>Locked</span> : null}

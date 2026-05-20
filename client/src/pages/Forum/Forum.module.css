@@ -1847,6 +1847,65 @@
 
 .commentActionLink:hover { color: var(--color-gold); }
 .commentActionDanger:hover { color: var(--color-red-light); }
+.commentActionLinkAccent { color: var(--color-gold); }
+.commentActionLinkAccent:hover { color: var(--color-gold-light, var(--color-gold)); }
+
+.commentEditedBadge {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.commentEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.commentEditActions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* Revisions button glows red when the post has been edited at least once,
+   so officers can spot recently-modified threads at a glance. */
+.revisionsBtnHasEdits {
+  color: var(--color-red-light) !important;
+  border-color: var(--color-red-light) !important;
+}
+.revisionsBtnHasEdits:hover {
+  background: rgba(229, 57, 53, 0.15);
+}
+
+/* Unread tracking visuals. forumUnreadDot is the per-post marker shown
+   beside the title; forumUnreadBadge is the per-category count chip. */
+.forumUnreadDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.5);
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
+
+.forumUnreadBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-gold);
+  color: var(--color-black);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 
 .commentText {
   font-family: var(--font-body);

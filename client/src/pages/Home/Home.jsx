@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo } from '../../utils/helpers';
 import { formatEventTime } from '../../utils/timezone';
+import { fullDisplayName } from '../../utils/userDisplay';
 import styles from './Home.module.css';
 import { postUrl } from '../../utils/forumUrls';
 
@@ -447,7 +448,7 @@ export default function Home() {
                       className={styles.updateAvatar}
                     />
                     <div>
-                      <span className={styles.updateName}>{post.display_name || post.username}</span>
+                      <span className={styles.updateName}>{fullDisplayName(post)}</span>
                       <span className={`rank-badge rank-badge--${post.user_rank}`}>{post.user_display_rank || post.user_rank}</span>
                     </div>
                     <span className={styles.updateTime}>{timeAgo(post.created_at)}</span>

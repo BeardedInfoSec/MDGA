@@ -235,6 +235,24 @@ router.get('/me', requireAuth, async (req, res) => {
   } catch (err) {
     console.warn('[/auth/me] character count lookup failed:', err.message);
   }
+  // Pull the user's main WoW character so the UI can prefer it over the
+  // generic display_name when greeting / labeling them (rapazzini forum #34:
+  // "show main character as display name, discord in parens").
+  let mainCharacterName = null;
+  let discordUsername = req.user.discord_username || null;
+  try {
+    const [[mc]] = await pool.execute(
+      'SELECT character_name FROM user_characters WHERE user_id = ? AND is_main = TRUE LIMIT 1',
+      [req.user.id]
+    );
+    mainCharacterName = mc?.character_name || null;
+    if (!discordUsername) {
+      const [[u]] = await pool.execute('SELECT discord_username FROM users WHERE id = ?', [req.user.id]);
+      discordUsername = u?.discord_username || null;
+    }
+  } catch (err) {
+    console.warn('[/auth/me] main character lookup failed:', err.message);
+  }
   res.json({
     user: {
       id: req.user.id,
@@ -245,6 +263,8 @@ router.get('/me', requireAuth, async (req, res) => {
       avatarUrl: req.user.avatar_url,
       realm: req.user.realm,
       characterName: req.user.character_name,
+      mainCharacterName,
+      discordUsername,
       timezone: req.user.timezone,
       permissions: req.user.permissions || [],
       mainFaction,

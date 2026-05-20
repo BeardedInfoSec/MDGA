@@ -266,6 +266,11 @@ export default function ForumIndex() {
                         {cat.age_restricted ? (
                           <span className={styles.forumTagSensitive} title="Age-restricted: viewers see an 18+ confirmation modal">18+</span>
                         ) : null}
+                        {cat.unread_count > 0 ? (
+                          <span className={styles.forumUnreadBadge} title={`${cat.unread_count} unread`}>
+                            {cat.unread_count} new
+                          </span>
+                        ) : null}
                       </div>
                       <div className={styles.forumPostMeta}>
                         <span>{cat.description || 'No description'}</span>

@@ -145,6 +145,11 @@
   border-color: var(--color-gold);
 }
 
+.userBtnSecondary {
+  color: var(--color-text-secondary);
+  font-weight: 400;
+}
+
 .userDropdown {
   display: none;
   position: absolute;
