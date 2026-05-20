@@ -610,15 +610,23 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'You do not have access to this post' });
     }
     if (postRows[0].locked) return res.status(403).json({ error: 'This post is locked' });
-    // Replies blocked until publish_at lands, even when the post is
-    // previewable during a drop-warning window. Officers / schedulers
-    // can still post (they can see the post normally).
-    if (postRows[0].publish_at && new Date(postRows[0].publish_at).getTime() > Date.now() && !canSeeScheduled(req.user)) {
-      const dropAt = new Date(postRows[0].publish_at);
-      return res.status(403).json({
-        error: `Replies are locked until the drop. Comments open at ${dropAt.toLocaleString()}.`,
-        dropAt: dropAt.toISOString(),
-      });
+    // Replies blocked until publish_at lands. On giveaway posts the lock
+    // applies to EVERYONE (including officers / forum.schedule_posts
+    // holders) so the kickoff message matches the actual gate. On
+    // non-giveaway scheduled posts officers can still comment early
+    // (e.g. for normal moderation / preview), matching prior behavior.
+    if (postRows[0].publish_at && new Date(postRows[0].publish_at).getTime() > Date.now()) {
+      const [[hasGiveaway]] = await pool.execute(
+        'SELECT post_id FROM giveaway_configs WHERE post_id = ?',
+        [postId]
+      );
+      if (hasGiveaway || !canSeeScheduled(req.user)) {
+        const dropAt = new Date(postRows[0].publish_at);
+        return res.status(403).json({
+          error: `Replies are locked until the drop. Comments open at ${dropAt.toLocaleString()}.`,
+          dropAt: dropAt.toISOString(),
+        });
+      }
     }
 
     const { content, imageUrl } = req.body;
