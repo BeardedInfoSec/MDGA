@@ -657,10 +657,20 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
 
   // Pull every live comment in chronological order with author identity
   // attached so the announcement embed can name the winner properly.
+  // excluded_from_giveaway is 1 when the author can manage giveaway configs
+  // (officer/GM rank OR any role granting forum.manage_giveaway) — those
+  // commenters land on the thread normally but do NOT tick the counter,
+  // so the website guru can post "MDGA!" to test without consuming slots.
   const [comments] = await pool.execute(
     `SELECT fc.id, fc.content, fc.user_id, fc.created_at,
             u.username, u.display_name, u.discord_id, u.discord_username,
-            uc_main.character_name AS main_character_name
+            uc_main.character_name AS main_character_name,
+            (u.\`rank\` IN ('officer','guildmaster') OR EXISTS (
+              SELECT 1 FROM user_roles ur
+              JOIN role_permissions rp ON rp.role_id = ur.role_id
+              JOIN permissions p ON p.id = rp.permission_id
+              WHERE ur.user_id = u.id AND p.key_name = 'forum.manage_giveaway'
+            )) AS excluded_from_giveaway
      FROM forum_comments fc
      JOIN users u ON u.id = fc.user_id
      LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
@@ -703,6 +713,7 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
   const newlyAnnounced = [];
   for (const c of comments) {
     if (!pattern.test(c.content)) continue;
+    if (c.excluded_from_giveaway) continue; // officers + giveaway managers don't tick the counter
     validIdx += 1;
     if (!targets.includes(validIdx)) continue;
     const key = String(validIdx);
