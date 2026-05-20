@@ -1147,7 +1147,7 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid post id' });
 
     const [[existing]] = await pool.execute(
-      'SELECT id, user_id, title, content FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
+      'SELECT id, user_id, title, content, publish_at FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
       [id]
     );
     if (!existing) return res.status(404).json({ error: 'Post not found' });
@@ -1171,16 +1171,66 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
 
     const titleChanged = cleanTitle !== existing.title;
     const contentChanged = cleanContent !== existing.content;
-    if (!titleChanged && !contentChanged) return res.json({ message: 'No changes' });
 
-    await pool.execute(
-      'INSERT INTO forum_post_revisions (post_id, edited_by, previous_title, previous_content) VALUES (?, ?, ?, ?)',
-      [id, req.user.id, existing.title, existing.content]
-    );
-    await pool.execute(
-      'UPDATE forum_posts SET title = ?, content = ?, updated_at = NOW() WHERE id = ?',
-      [cleanTitle, cleanContent, id]
-    );
+    // Optional schedule update — officers / forum.schedule_posts only.
+    // Three states the client can send:
+    //   undefined  -> don't touch publish_at (legacy edit, body-only)
+    //   null/empty -> clear publish_at (publish immediately, also clears
+    //                  the deferred-kickoff lock so the scheduler fires
+    //                  the announcement next tick)
+    //   string     -> new local wall-clock; needs publishTimezone too
+    const wantsScheduleUpdate = Object.prototype.hasOwnProperty.call(req.body, 'publishAt');
+    let newPublishAtSql = undefined;
+    if (wantsScheduleUpdate) {
+      if (!canSeeScheduled(req.user)) {
+        return res.status(403).json({ error: 'Not authorized to change publish time' });
+      }
+      if (req.body.publishAt === null || req.body.publishAt === '') {
+        newPublishAtSql = null;
+      } else {
+        const tz = (req.body.publishTimezone || '').trim();
+        if (tz) {
+          const dt = DateTime.fromISO(String(req.body.publishAt).trim(), { zone: tz });
+          if (!dt.isValid) return res.status(400).json({ error: 'Invalid publishAt / publishTimezone' });
+          newPublishAtSql = dt.toUTC().toFormat('yyyy-MM-dd HH:mm:ss');
+        } else {
+          const parsed = new Date(req.body.publishAt);
+          if (Number.isNaN(parsed.getTime())) {
+            return res.status(400).json({ error: 'Invalid publishAt' });
+          }
+          newPublishAtSql = parsed.toISOString().slice(0, 19).replace('T', ' ');
+        }
+      }
+    }
+    const scheduleChanged = wantsScheduleUpdate && String(newPublishAtSql || '') !== String(existing.publish_at || '').slice(0, 19).replace('T', ' ');
+
+    if (!titleChanged && !contentChanged && !scheduleChanged) return res.json({ message: 'No changes' });
+
+    if (titleChanged || contentChanged) {
+      await pool.execute(
+        'INSERT INTO forum_post_revisions (post_id, edited_by, previous_title, previous_content) VALUES (?, ?, ?, ?)',
+        [id, req.user.id, existing.title, existing.content]
+      );
+    }
+    if (wantsScheduleUpdate) {
+      await pool.execute(
+        'UPDATE forum_posts SET title = ?, content = ?, publish_at = ?, updated_at = NOW() WHERE id = ?',
+        [cleanTitle, cleanContent, newPublishAtSql, id]
+      );
+      // Reset kickoff/warning state so the scheduler can re-announce
+      // against the new publish moment. (No-op if no giveaway config.)
+      await pool.execute(
+        `UPDATE giveaway_configs
+         SET kickoff_announced_at = NULL, warnings_sent = JSON_OBJECT()
+         WHERE post_id = ?`,
+        [id]
+      );
+    } else {
+      await pool.execute(
+        'UPDATE forum_posts SET title = ?, content = ?, updated_at = NOW() WHERE id = ?',
+        [cleanTitle, cleanContent, id]
+      );
+    }
 
     if (!isOwner) {
       logAdminAction({

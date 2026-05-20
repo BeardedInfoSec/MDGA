@@ -13,6 +13,7 @@ import MarkdownEditor from '../../components/common/MarkdownEditor';
 import MentionSuggest from '../../components/common/MentionSuggest';
 import NumberChipsField from '../../components/common/NumberChipsField';
 import GuildFlag from '../../components/common/GuildFlag';
+import { getTimezoneOptions } from '../../utils/timezone';
 import AgeGate from '../../components/common/AgeGate';
 import ForumSidebar from './ForumSidebar';
 import styles from './Forum.module.css';
@@ -46,6 +47,14 @@ export default function ForumPost() {
   const [editContent, setEditContent] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  // Schedule fields editable from the Edit Post modal (officers /
+  // forum.schedule_posts only). Stored as the datetime-local string +
+  // an IANA timezone so the wall-clock intent survives a round-trip.
+  const [editPublishAt, setEditPublishAt] = useState('');
+  const [editPublishTz, setEditPublishTz] = useState(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; }
+    catch { return 'America/New_York'; }
+  });
   // Per-comment edit state. Keyed by comment id so multiple inline editors
   // could theoretically be open at once, but in practice only one is shown.
   const [editingCommentId, setEditingCommentId] = useState(null);
@@ -71,6 +80,24 @@ export default function ForumPost() {
     setEditTitle(post.title || '');
     setEditContent(post.content || '');
     setEditError('');
+    // Seed the schedule fields from whatever the server stored. publish_at
+    // comes back as UTC; render it in the previously-set TZ so officers
+    // see the same wall-clock they originally typed. Falls back to the
+    // browser's IANA zone for posts saved before TZ-awareness shipped.
+    if (post.publish_at) {
+      try {
+        const d = new Date(post.publish_at);
+        const tz = editPublishTz;
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false,
+        }).formatToParts(d);
+        const get = (t) => parts.find((p) => p.type === t)?.value || '';
+        setEditPublishAt(`${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`);
+      } catch { setEditPublishAt(''); }
+    } else {
+      setEditPublishAt('');
+    }
     setEditOpen(true);
   };
 
@@ -82,9 +109,17 @@ export default function ForumPost() {
     setEditSaving(true);
     setEditError('');
     try {
+      const canSchedule = isOfficer() || hasPermission('forum.schedule_posts');
+      const body = { title: editTitle.trim(), content: editContent.trim() };
+      if (canSchedule) {
+        // Pass an explicit null when the field is cleared so the server
+        // wipes the publish_at column (becomes immediately visible).
+        body.publishAt = editPublishAt || null;
+        body.publishTimezone = editPublishAt ? editPublishTz : null;
+      }
       const res = await apiFetch(`/forum/posts/${post.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ title: editTitle.trim(), content: editContent.trim() }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -937,6 +972,36 @@ export default function ForumPost() {
                 <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Content (markdown supported)</span>
                 <MarkdownEditor value={editContent} onChange={setEditContent} rows={10} />
               </label>
+              {(isOfficer() || hasPermission('forum.schedule_posts')) && (
+                <div style={{ display: 'block', marginTop: 12 }}>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                    Schedule publish <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(leave blank to publish immediately)</span>
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <input
+                      type="datetime-local"
+                      value={editPublishAt}
+                      onChange={(e) => setEditPublishAt(e.target.value)}
+                      style={{ flex: '1 1 220px', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                    />
+                    <select
+                      value={editPublishTz}
+                      onChange={(e) => setEditPublishTz(e.target.value)}
+                      style={{ flex: '1 1 220px', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
+                      aria-label="Timezone for scheduled publish"
+                    >
+                      {getTimezoneOptions().map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {editPublishAt && (
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
+                      Drop time locked to {editPublishTz}.
+                    </span>
+                  )}
+                </div>
+              )}
               {editError && <p style={{ color: 'var(--color-red-light)', marginTop: 12 }}>{editError}</p>}
               <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn--secondary btn--sm" onClick={() => setEditOpen(false)}>Cancel</button>
