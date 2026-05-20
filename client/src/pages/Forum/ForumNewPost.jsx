@@ -45,9 +45,8 @@ export default function ForumNewPost() {
   // the create succeeds — same fields the post-detail modal exposes.
   const [giveawayEnabled, setGiveawayEnabled] = useState(false);
   const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
-  const [giveawayPattern, setGiveawayPattern] = useState('^(MDGA|MEGA)!$');
   const [giveawayRateMin, setGiveawayRateMin] = useState('5');
-  const [giveawayChannelId, setGiveawayChannelId] = useState('');
+  const [giveawayWarnings, setGiveawayWarnings] = useState('30, 15, 5');
 
   useDocumentTitle(category ? `New post in ${category.name} | MDGA` : 'New Post | MDGA');
 
@@ -166,13 +165,16 @@ export default function ForumNewPost() {
           return;
         }
         const rateSec = Math.max(0, Math.min(60, parseInt(giveawayRateMin, 10) || 0)) * 60;
+        const warningMinutes = giveawayWarnings
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => Number.isInteger(n) && n > 0 && n <= 1440);
         const gRes = await apiFetch(`/forum/posts/${data.id}/giveaway`, {
           method: 'PUT',
           body: JSON.stringify({
             target_positions: positions,
-            valid_pattern: giveawayPattern,
             rate_limit_seconds: rateSec,
-            channel_id: giveawayChannelId.trim() || null,
+            warning_minutes: warningMinutes,
           }),
         });
         if (!gRes.ok) {
@@ -410,17 +412,6 @@ export default function ForumNewPost() {
                         />
                       </label>
                       <label>
-                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Valid pattern (regex)</span>
-                        <input
-                          type="text"
-                          value={giveawayPattern}
-                          onChange={(e) => setGiveawayPattern(e.target.value)}
-                          placeholder="^(MDGA|MEGA)!$"
-                          className={styles.composeTextInput}
-                          style={{ fontFamily: 'var(--font-mono, monospace)' }}
-                        />
-                      </label>
-                      <label>
                         <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = none)</span>
                         <input
                           type="number"
@@ -433,19 +424,23 @@ export default function ForumNewPost() {
                         />
                       </label>
                       <label>
-                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Discord channel ID (blank = officer channel)</span>
+                        <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                          Drop hint warnings (minutes before publish, comma-separated)
+                        </span>
                         <input
                           type="text"
-                          value={giveawayChannelId}
-                          onChange={(e) => setGiveawayChannelId(e.target.value)}
-                          placeholder="e.g. 1483266989647724758"
+                          value={giveawayWarnings}
+                          onChange={(e) => setGiveawayWarnings(e.target.value)}
+                          placeholder="30, 15, 5"
                           className={styles.composeTextInput}
-                          style={{ fontFamily: 'var(--font-mono, monospace)' }}
                         />
                         <span className={styles.composeUploadHint}>
-                          Where winners + the "giveaway started" message land. Digits only.
+                          Only fires if you also set a scheduled publish time above. Example: "30, 15, 5" → the bot pings Discord 30 / 15 / 5 minutes before the drop.
                         </span>
                       </label>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                        Reply pattern (<code>MDGA!</code> / <code>MEGA!</code>) and the Discord announcement channel are fixed sitewide.
+                      </p>
                     </div>
                   )}
                 </div>

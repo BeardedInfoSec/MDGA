@@ -47,6 +47,12 @@ function hasOfficerCategoryAccess(user) {
   return Array.isArray(user.permissions) && user.permissions.includes('forum.access_officer_categories');
 }
 
+// Giveaway hard-coded values — the regex and announcement channel are
+// fixed for every drop now, so officers configure positions + cooldown
+// only. Change here to flip every future giveaway in one edit.
+const GIVEAWAY_VALID_PATTERN = '^(MDGA|MEGA)!$';
+const GIVEAWAY_CHANNEL_ID = '1483266989647724758';
+
 // Scheduled-publish gating (rapazzini forum #39). A non-officer viewer must
 // not see a post whose publish_at is still in the future; officers can,
 // rendered in muted style so they can preview/edit before the cutover.
@@ -1314,7 +1320,7 @@ router.get('/posts/:id/giveaway', async (req, res) => {
     const postId = parsePostId(req.params.id);
     if (!postId) return res.status(404).json({ error: 'Post not found' });
     const [rows] = await pool.execute(
-      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, winners, announced, created_at, updated_at FROM giveaway_configs WHERE post_id = ?',
+      'SELECT post_id, target_positions, valid_pattern, rate_limit_seconds, warning_minutes, channel_id, winners, announced, kickoff_announced_at, created_at, updated_at FROM giveaway_configs WHERE post_id = ?',
       [postId]
     );
     if (rows.length === 0) return res.json({ config: null });
@@ -1325,7 +1331,9 @@ router.get('/posts/:id/giveaway', async (req, res) => {
         target_positions: typeof r.target_positions === 'string' ? JSON.parse(r.target_positions) : r.target_positions,
         valid_pattern: r.valid_pattern,
         rate_limit_seconds: r.rate_limit_seconds,
+        warning_minutes: typeof r.warning_minutes === 'string' ? JSON.parse(r.warning_minutes) : (r.warning_minutes || []),
         channel_id: r.channel_id,
+        kickoff_announced_at: r.kickoff_announced_at,
         winners: typeof r.winners === 'string' ? JSON.parse(r.winners) : r.winners,
         announced: typeof r.announced === 'string' ? JSON.parse(r.announced) : r.announced,
         created_at: r.created_at,
@@ -1358,19 +1366,23 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
     }
     const dedupSorted = Array.from(new Set(cleanPositions)).sort((a, b) => a - b);
 
-    const validPattern = String(req.body.valid_pattern || '^(MDGA|MEGA)!$').slice(0, 200);
-    try {
-      new RegExp(validPattern); // throws on bad regex
-    } catch (e) {
-      return res.status(400).json({ error: 'Invalid valid_pattern regex: ' + e.message });
-    }
+    // Pattern + channel are now hard-coded server-side (see constants at
+    // top of this file). The PUT route ignores whatever the client sends
+    // for these — officers only configure positions + cooldown via the UI.
+    const validPattern = GIVEAWAY_VALID_PATTERN;
+    const channelId = GIVEAWAY_CHANNEL_ID;
 
     const rateLimitSeconds = Math.max(0, Math.min(3600, parseInt(req.body.rate_limit_seconds, 10) || 0));
-    // channel_id is the Discord snowflake to post the winner alert to.
-    // Empty / blank means "fall back to officer channel" (handled in
-    // sendDiscordAnnouncement). Limited to digits to avoid bogus values.
-    const rawChannel = String(req.body.channel_id || '').trim();
-    const channelId = /^\d{15,25}$/.test(rawChannel) ? rawChannel : null;
+
+    // Drop hype warnings: array of minutes-before-publish_at to fire a
+    // Discord ping. Sanitized to integers in [1, 1440] (max 24h ahead),
+    // deduped, sorted descending so the biggest warning fires first.
+    const rawWarnings = Array.isArray(req.body.warning_minutes) ? req.body.warning_minutes : [];
+    const cleanWarnings = Array.from(new Set(
+      rawWarnings
+        .map((n) => parseInt(n, 10))
+        .filter((n) => Number.isInteger(n) && n > 0 && n <= 1440)
+    )).sort((a, b) => b - a);
 
     // Detect whether this is the first config save for the post so we
     // only fire the "giveaway started" announcement once. Subsequent
@@ -1383,22 +1395,43 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
     const isNewConfig = !existingCfg;
 
     await pool.execute(
-      `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, warning_minutes, channel_id, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          target_positions = VALUES(target_positions),
          valid_pattern = VALUES(valid_pattern),
          rate_limit_seconds = VALUES(rate_limit_seconds),
+         warning_minutes = VALUES(warning_minutes),
          channel_id = VALUES(channel_id)`,
-      [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, channelId, req.user.id]
+      [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, JSON.stringify(cleanWarnings), channelId, req.user.id]
     );
 
     // Kickoff announcement (forum giveaway followup). Posts to the same
     // channel that winners will land in, so members see "drop started"
     // and "slot N filled" in the same conversation.
-    if (isNewConfig) {
+    //
+    // For scheduled posts (publish_at in the future), defer the kickoff
+    // to the publish moment — sending "Giveaway started" while the post
+    // is still hidden would confuse anyone who clicks the link.
+    const [[postSchedRow]] = await pool.execute(
+      'SELECT publish_at FROM forum_posts WHERE id = ?',
+      [postId]
+    );
+    const publishInFuture = postSchedRow?.publish_at && new Date(postSchedRow.publish_at).getTime() > Date.now();
+    if (publishInFuture) {
+      // Scheduler picks it up when publish_at is reached.
+      await pool.execute(
+        'UPDATE giveaway_configs SET kickoff_announced_at = NULL WHERE post_id = ?',
+        [postId]
+      );
+    } else if (isNewConfig) {
+      // Treat as kickoff-now even on edit-then-save-fresh by stamping
+      // kickoff_announced_at when we actually fire the embed below.
+    }
+
+    if (isNewConfig && !publishInFuture) {
       const [[postRow]] = await pool.execute(
-        'SELECT id, title, image_url FROM forum_posts WHERE id = ?',
+        'SELECT id, title, content, image_url FROM forum_posts WHERE id = ?',
         [postId]
       );
       // Pull up to 4 attached images (Discord renders that many as a
@@ -1448,17 +1481,37 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
           ? `Comment **#${dedupSorted[0]}** wins.`
           : `Comments at positions **${dedupSorted.join(', ')}** win.`;
         const postUrl = `https://mdga.gg/forum/post/${postPath}`;
-        setImmediate(() => sendDiscordAnnouncement(
-          channelId,
-          `Giveaway started: ${postRow.title}`,
-          [
-            `${slotPhrase} ${replyHint}${cooldownNote}`,
-            ``,
-            postUrl,
-          ].join('\n'),
-          0xD4AF37,
-          { imageUrls: postImages, galleryUrl: postUrl }
-        ).catch((err) => console.error('Giveaway kickoff announcement failed:', err.message)));
+        // The post body carries the full rules / prize description —
+        // bring it into the Discord embed so members don't have to click
+        // through to read what they're entering for. Markdown survives
+        // Discord's renderer; we just strip horizontal-rule lines (---)
+        // which Discord shows literally, and cap to 3500 chars to leave
+        // room for the trailing call-to-action + link.
+        const bodyForDiscord = String(postRow.content || '')
+          .replace(/^\s*---+\s*$/gm, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+          .slice(0, 3500);
+        const summaryLine = `${slotPhrase} ${replyHint}${cooldownNote}`;
+        const description = [
+          bodyForDiscord,
+          bodyForDiscord ? '' : null,
+          `**${summaryLine}**`,
+          postUrl,
+        ].filter((s) => s !== null).join('\n');
+        setImmediate(async () => {
+          const sent = await sendDiscordAnnouncement(
+            channelId,
+            `Giveaway started: ${postRow.title}`,
+            description,
+            0xD4AF37,
+            { imageUrls: postImages, galleryUrl: postUrl }
+          ).catch((err) => { console.error('Giveaway kickoff announcement failed:', err.message); return false; });
+          if (sent) {
+            await pool.execute('UPDATE giveaway_configs SET kickoff_announced_at = NOW() WHERE post_id = ?', [postId])
+              .catch(() => {});
+          }
+        });
       }
     }
 
@@ -1484,5 +1537,143 @@ router.delete('/posts/:id/giveaway', requireAuth, async (req, res) => {
   }
 });
 
+
+// ────────────────────────────────────────────────────────────────────
+// Giveaway scheduler: fires drop-warning + deferred-kickoff Discord
+// messages for scheduled giveaway posts. Runs every 60s, picks up any
+// (post + giveaway) pair where:
+//   - publish_at is in the future and a warning_minutes interval has
+//     elapsed without warnings_sent[interval] being set, OR
+//   - publish_at is at/past now and kickoff_announced_at is NULL
+// Both paths update the row before sending Discord so a crash mid-send
+// doesn't fire the same message twice on next tick.
+// ────────────────────────────────────────────────────────────────────
+
+async function processGiveawaySchedule() {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT gc.post_id, gc.target_positions, gc.valid_pattern, gc.rate_limit_seconds,
+              gc.warning_minutes, gc.warnings_sent, gc.kickoff_announced_at, gc.channel_id,
+              fp.title, fp.content, fp.publish_at, fp.image_url
+       FROM giveaway_configs gc
+       JOIN forum_posts fp ON fp.id = gc.post_id
+       WHERE fp.deleted_at IS NULL
+         AND (
+           gc.kickoff_announced_at IS NULL
+           OR (fp.publish_at IS NOT NULL AND fp.publish_at > NOW() AND JSON_LENGTH(gc.warning_minutes) > 0)
+         )`
+    );
+
+    for (const row of rows) {
+      const publishMs = row.publish_at ? new Date(row.publish_at).getTime() : null;
+      const channelId = row.channel_id || GIVEAWAY_CHANNEL_ID;
+      const warnings = typeof row.warning_minutes === 'string'
+        ? JSON.parse(row.warning_minutes) : (row.warning_minutes || []);
+      const sentMap = typeof row.warnings_sent === 'string'
+        ? JSON.parse(row.warnings_sent) : (row.warnings_sent || {});
+
+      // Build the friendly post URL once per row.
+      const slug = String(row.title || '')
+        .toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-')
+        .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+      const postUrl = `https://mdga.gg/forum/post/${slug ? `${row.post_id}-${slug}` : row.post_id}`;
+
+      // Fetch images for both warnings + kickoff (Discord renders up to 4).
+      const [imgRows] = await pool.execute(
+        'SELECT image_url FROM forum_post_images WHERE post_id = ? ORDER BY sort_order ASC, id ASC LIMIT 4',
+        [row.post_id]
+      );
+      let postImages = imgRows.map((r) => r.image_url);
+      if (postImages.length === 0 && row.image_url) postImages = [row.image_url];
+
+      // ── Drop-hint warnings ──
+      if (publishMs && publishMs > Date.now()) {
+        for (const minutes of warnings) {
+          const key = String(minutes);
+          if (sentMap[key]) continue;
+          const fireAt = publishMs - minutes * 60 * 1000;
+          if (Date.now() < fireAt) continue;
+
+          const minsLeft = Math.max(1, Math.round((publishMs - Date.now()) / 60000));
+          const sent = await sendDiscordAnnouncement(
+            channelId,
+            `Drop incoming: ${row.title}`,
+            [
+              `**${minsLeft} minute${minsLeft === 1 ? '' : 's'}** until the drop. Get ready.`,
+              ``,
+              postUrl,
+            ].join('\n'),
+            0xB91C1C, // red — feels like a countdown
+            { imageUrls: postImages, galleryUrl: postUrl }
+          ).catch((err) => { console.error(`Drop warning send failed (post ${row.post_id}, ${minutes}m):`, err.message); return false; });
+
+          if (sent) {
+            sentMap[key] = 1;
+            await pool.execute(
+              'UPDATE giveaway_configs SET warnings_sent = ? WHERE post_id = ?',
+              [JSON.stringify(sentMap), row.post_id]
+            );
+          }
+        }
+      }
+
+      // ── Deferred kickoff ──
+      if (!row.kickoff_announced_at && publishMs && Date.now() >= publishMs) {
+        const targets = typeof row.target_positions === 'string'
+          ? JSON.parse(row.target_positions) : row.target_positions;
+        const altMatch = String(row.valid_pattern || '').match(/^\^\(([^)]+)\)([^()]*)\$$/);
+        let replyHint;
+        if (altMatch) {
+          const alts = altMatch[1].split('|').map((a) => `\`${a}${altMatch[2] || ''}\``);
+          replyHint = `Reply with ${alts.join(' or ')} to enter.`;
+        } else {
+          replyHint = 'See the post for entry rules.';
+        }
+        const cooldownNote = row.rate_limit_seconds > 0
+          ? ` Replies are rate-limited to once every ${Math.round(row.rate_limit_seconds / 60)} minute(s) per account.`
+          : '';
+        const slotPhrase = targets.length === 1
+          ? `Comment **#${targets[0]}** wins.`
+          : `Comments at positions **${targets.join(', ')}** win.`;
+        const bodyForDiscord = String(row.content || '')
+          .replace(/^\s*---+\s*$/gm, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
+          .slice(0, 3500);
+        const description = [
+          bodyForDiscord,
+          bodyForDiscord ? '' : null,
+          `**${slotPhrase} ${replyHint}${cooldownNote}**`,
+          postUrl,
+        ].filter((s) => s !== null).join('\n');
+
+        const sent = await sendDiscordAnnouncement(
+          channelId,
+          `Giveaway started: ${row.title}`,
+          description,
+          0xD4AF37,
+          { imageUrls: postImages, galleryUrl: postUrl }
+        ).catch((err) => { console.error(`Deferred kickoff failed (post ${row.post_id}):`, err.message); return false; });
+
+        if (sent) {
+          await pool.execute(
+            'UPDATE giveaway_configs SET kickoff_announced_at = NOW() WHERE post_id = ?',
+            [row.post_id]
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Giveaway scheduler] cycle error:', err.message);
+  }
+}
+
+// Kick the scheduler 30s after boot (lets DB pool warm up) then every 60s.
+if (process.env.NODE_ENV !== 'test') {
+  setTimeout(() => {
+    processGiveawaySchedule();
+    setInterval(processGiveawaySchedule, 60 * 1000);
+  }, 30 * 1000);
+}
 
 module.exports = router;

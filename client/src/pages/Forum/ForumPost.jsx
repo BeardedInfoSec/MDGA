@@ -60,9 +60,8 @@ export default function ForumPost() {
   const [giveawayOpen, setGiveawayOpen] = useState(false);
   const [giveawayConfig, setGiveawayConfig] = useState(null);
   const [giveawayPositions, setGiveawayPositions] = useState('1, 100');
-  const [giveawayPattern, setGiveawayPattern] = useState('^(MDGA|MEGA)!$');
   const [giveawayRateMin, setGiveawayRateMin] = useState('5');
-  const [giveawayChannelId, setGiveawayChannelId] = useState('');
+  const [giveawayWarnings, setGiveawayWarnings] = useState('30, 15, 5');
   const [giveawaySaving, setGiveawaySaving] = useState(false);
   const [giveawayError, setGiveawayError] = useState('');
 
@@ -273,14 +272,12 @@ export default function ForumPost() {
         setGiveawayConfig(cfg);
         if (cfg) {
           setGiveawayPositions((cfg.target_positions || []).join(', '));
-          setGiveawayPattern(cfg.valid_pattern || '^(MDGA|MEGA)!$');
           setGiveawayRateMin(String(Math.round((cfg.rate_limit_seconds || 0) / 60)));
-          setGiveawayChannelId(cfg.channel_id || '');
+          setGiveawayWarnings((cfg.warning_minutes || []).join(', '));
         } else {
           setGiveawayPositions('1, 100');
-          setGiveawayPattern('^(MDGA|MEGA)!$');
           setGiveawayRateMin('5');
-          setGiveawayChannelId('');
+          setGiveawayWarnings('30, 15, 5');
         }
       }
     } catch {
@@ -302,9 +299,11 @@ export default function ForumPost() {
         method: 'PUT',
         body: JSON.stringify({
           target_positions: positions,
-          valid_pattern: giveawayPattern,
           rate_limit_seconds: rateSec,
-          channel_id: giveawayChannelId.trim() || null,
+          warning_minutes: giveawayWarnings
+            .split(',')
+            .map((s) => parseInt(s.trim(), 10))
+            .filter((n) => Number.isInteger(n) && n > 0 && n <= 1440),
         }),
       });
       if (!res.ok) {
@@ -1027,16 +1026,6 @@ export default function ForumPost() {
                 />
               </label>
               <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Valid pattern (regex)</span>
-                <input
-                  type="text"
-                  value={giveawayPattern}
-                  onChange={(e) => setGiveawayPattern(e.target.value)}
-                  placeholder="^(MDGA|MEGA)!$"
-                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-mono, monospace)' }}
-                />
-              </label>
-              <label style={{ display: 'block', marginBottom: 12 }}>
                 <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Per-user cooldown (minutes, 0 = disabled)</span>
                 <input
                   type="number"
@@ -1048,18 +1037,23 @@ export default function ForumPost() {
                 />
               </label>
               <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Discord channel ID (blank = officer channel)</span>
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                  Drop hint warnings (minutes before publish, comma-separated)
+                </span>
                 <input
                   type="text"
-                  value={giveawayChannelId}
-                  onChange={(e) => setGiveawayChannelId(e.target.value)}
-                  placeholder="e.g. 1483266989647724758"
-                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-mono, monospace)' }}
+                  value={giveawayWarnings}
+                  onChange={(e) => setGiveawayWarnings(e.target.value)}
+                  placeholder="30, 15, 5"
+                  style={{ width: '100%', padding: '8px 12px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
                 />
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-                  Where the bot posts winner alerts. Use a Discord channel snowflake (digits only).
+                  Only fires for scheduled posts (with a future publish time). The bot pings Discord N minutes before the drop.
                 </span>
               </label>
+              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                Reply pattern (<code>MDGA!</code> / <code>MEGA!</code>) and the Discord announcement channel are fixed sitewide.
+              </p>
               {giveawayConfig?.winners && Object.keys(giveawayConfig.winners).length > 0 && (
                 <div style={{ marginTop: 16, padding: 12, background: 'rgba(212, 175, 55, 0.08)', borderRadius: 'var(--border-radius-sm)' }}>
                   <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-gold)', marginBottom: 4 }}>Current winners</span>
