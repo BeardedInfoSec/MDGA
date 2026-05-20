@@ -44,6 +44,7 @@
   font-size: var(--font-size-lg);
   color: var(--color-gold);
   letter-spacing: 2px;
+  margin-right: var(--space-6);
 }
 
 .links {
