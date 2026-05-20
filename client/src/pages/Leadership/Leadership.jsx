@@ -69,7 +69,7 @@ const LEADERS = [
     rank: 'The Architect',
     classKey: 'druid',
     classLabel: 'Resto / Guardian Druid',
-    image: '/images/polychange.png',
+    image: '/images/polychange.jpg',
     imageAlt: 'Polychange — The Architect of MDGA',
     paragraphs: [
       "Polychange is the Architect — the Tauren druid who built the digital ground every MDGA member walks on. Twenty years deep in Azeroth, north of 400,000 confirmed kills logged across the account, and a lifelong instinct for taking things apart and reassembling them better. The website, the forum, the roster pipeline, the tooling that keeps the warband coordinated across server shards — all of it was forged by him.",
