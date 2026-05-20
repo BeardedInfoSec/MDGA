@@ -284,16 +284,25 @@ async function processRankChanges(guildId, changes) {
       }
       if (!userId) continue; // No site account linked
 
-      // Main character rank wins: only sync if this is the user's main character
+      // Main character rank wins: only apply this rank change if the
+      // changed character IS the user's marked main. Previously, when a
+      // user had no main flagged, this block was skipped entirely and
+      // EVERY alt's rank change cascaded into the user's site rank — so
+      // a user with characters in two different guilds (each mapped to a
+      // different site rank) would have their site rank flip every sync.
+      // Now: no main → no auto-rank-apply. Officers can set a main on the
+      // user's profile to opt in.
       const [mainChar] = await pool.execute(
         'SELECT character_name, realm_slug FROM user_characters WHERE user_id = ? AND is_main = TRUE',
         [userId]
       );
-      if (mainChar.length > 0) {
-        const isMain = mainChar[0].character_name.toLowerCase() === change.characterName.toLowerCase()
-          && mainChar[0].realm_slug.toLowerCase() === change.realmSlug.toLowerCase();
-        if (!isMain) continue; // Skip rank changes on alt characters
+      if (mainChar.length === 0) {
+        console.log(`[Game rank sync] ${change.characterName}: user ${userId} has no main character set — skipping rank cascade`);
+        continue;
       }
+      const isMain = mainChar[0].character_name.toLowerCase() === change.characterName.toLowerCase()
+        && mainChar[0].realm_slug.toLowerCase() === change.realmSlug.toLowerCase();
+      if (!isMain) continue; // Skip rank changes on alt characters
 
       // Get user's Discord ID
       const [userRow] = await pool.execute(
@@ -346,6 +355,23 @@ async function processRankChanges(guildId, changes) {
         console.log(`[Game rank sync] ${username}: site rank updated to ${newMapping.site_rank}`);
       }
 
+      // Throttle: skip the alert if we sent one for this character in the
+      // last hour. Blizzard's roster API sometimes flaps ranks across
+      // back-to-back syncs and we don't want to alert every cycle for a
+      // single in-game rank change.
+      const [throttleRow] = await pool.execute(
+        `SELECT last_rank_alert_at FROM guild_members
+         WHERE guild_id = ? AND character_name = ? LIMIT 1`,
+        [guildId, change.characterName]
+      );
+      const lastAlertAt = throttleRow[0]?.last_rank_alert_at;
+      const RANK_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+      const tooRecent = lastAlertAt && (Date.now() - new Date(lastAlertAt).getTime() < RANK_ALERT_COOLDOWN_MS);
+      if (tooRecent) {
+        console.log(`[Game rank sync] ${change.characterName}: alert suppressed (within 1h cooldown)`);
+        continue;
+      }
+
       sendOfficerAlert(
         'In-Game Rank Change Detected',
         `**${change.characterName}** rank changed: **${change.oldRank}** → **${change.newRank}**\n` +
@@ -353,6 +379,11 @@ async function processRankChanges(guildId, changes) {
         `Discord roles ${discordRoleChanged ? 'updated' : 'unchanged'}` +
         (siteRankChanged ? `\nSite rank: **${newMapping.site_rank}**` : ''),
         0x5865F2
+      );
+      await pool.execute(
+        `UPDATE guild_members SET last_rank_alert_at = NOW()
+         WHERE guild_id = ? AND character_name = ?`,
+        [guildId, change.characterName]
       );
     } catch (err) {
       console.error(`[Game rank sync] Error processing ${change.characterName}:`, err.message);
