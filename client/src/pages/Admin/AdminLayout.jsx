@@ -9,6 +9,7 @@ import {
   LayoutDashboard, Users, Shield, ShieldCheck, FileText,
   ChevronLeft, ChevronRight, Menu, X, ExternalLink,
 } from 'lucide-react';
+import { primaryName } from '../../utils/userDisplay';
 import styles from './AdminLayout.module.css';
 
 // Sidebar definition. Each group has an icon + label + items. Items map 1:1 to
@@ -169,10 +170,10 @@ export default function AdminLayout({
         <div className={styles.sidebarFooter}>
           <div className={styles.userBadge}>
             <div className={styles.userBadgeAvatar}>
-              {user?.display_name?.[0]?.toUpperCase() || user?.username?.[0]?.toUpperCase() || '?'}
+              {(primaryName(user) || 'A')[0].toUpperCase()}
             </div>
             <div className={styles.userBadgeText}>
-              <div className={styles.userBadgeName}>{user?.display_name || user?.username || 'Admin'}</div>
+              <div className={styles.userBadgeName}>{primaryName(user) || 'Admin'}</div>
               <div className={styles.userBadgeRank}>{user?.rank || ''}</div>
             </div>
           </div>

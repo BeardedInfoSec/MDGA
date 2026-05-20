@@ -38,9 +38,11 @@ router.get('/stats', requireAuth, requirePermission('admin.view_panel'), async (
       pool.execute('SELECT COUNT(*) AS n FROM forum_comments WHERE deleted_at IS NULL'),
       pool.execute("SELECT COUNT(*) AS n FROM forum_posts WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL 24 HOUR"),
       pool.execute(`
-        SELECT u.id, u.username, u.display_name, u.display_rank, u.\`rank\`,
+        SELECT u.id, u.username, u.display_name, u.discord_username, u.display_rank, u.\`rank\`,
+               uc_main.character_name AS main_character_name,
                COUNT(fp.id) AS post_count
         FROM users u
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
         LEFT JOIN forum_posts fp ON fp.user_id = u.id AND fp.deleted_at IS NULL
         GROUP BY u.id HAVING post_count > 0
         ORDER BY post_count DESC LIMIT 5`),
@@ -52,19 +54,27 @@ router.get('/stats', requireAuth, requirePermission('admin.view_panel'), async (
       pool.execute('SELECT COUNT(DISTINCT user_id) AS n FROM user_characters'),
       pool.execute('SELECT COUNT(*) AS n FROM discord_members WHERE is_in_guild = 1'),
       pool.execute(`
-        SELECT id, username, display_name, status, created_at
-        FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY
-        ORDER BY created_at DESC LIMIT 10`),
+        SELECT u.id, u.username, u.display_name, u.discord_username, u.status, u.created_at,
+               uc_main.character_name AS main_character_name
+        FROM users u
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+        WHERE u.created_at >= NOW() - INTERVAL 7 DAY
+        ORDER BY u.created_at DESC LIMIT 10`),
       pool.execute(`
-        SELECT id, username, display_name, last_login_at
-        FROM users WHERE last_login_at IS NOT NULL
-        ORDER BY last_login_at DESC LIMIT 10`),
+        SELECT u.id, u.username, u.display_name, u.discord_username, u.last_login_at,
+               uc_main.character_name AS main_character_name
+        FROM users u
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+        WHERE u.last_login_at IS NOT NULL
+        ORDER BY u.last_login_at DESC LIMIT 10`),
       pool.execute(`
         SELECT fp.id, fp.title, fp.created_at,
-               u.username, u.display_name, u.display_rank, u.\`rank\`,
+               u.username, u.display_name, u.discord_username, u.display_rank, u.\`rank\`,
+               uc_main.character_name AS main_character_name,
                fc.name AS category_name
         FROM forum_posts fp
         JOIN users u ON u.id = fp.user_id
+        LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
         JOIN forum_categories fc ON fc.id = fp.category_id
         WHERE fp.deleted_at IS NULL
         ORDER BY fp.created_at DESC LIMIT 10`),

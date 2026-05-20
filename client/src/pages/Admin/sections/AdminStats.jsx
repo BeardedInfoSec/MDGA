@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { RefreshCw, Users, LogIn, MessageSquare, Calendar, Sword, Hash } from 'lucide-react';
 import styles from './AdminStats.module.css';
 import { postUrlFromParts } from '../../../utils/forumUrls';
+import { fullDisplayName } from '../../../utils/userDisplay';
 
 function timeAgo(iso) {
   if (!iso) return '—';
@@ -113,7 +114,7 @@ export default function AdminStats({ apiFetch, showToast }) {
                   <span className={`rank-badge rank-badge--${u.rank}`}>
                     {u.display_rank || u.rank}
                   </span>
-                  <span className={styles.listName}>{u.display_name || u.username}</span>
+                  <span className={styles.listName}>{fullDisplayName(u)}</span>
                 </Link>
                 <span className={styles.listValue}>{fmt(u.post_count)} posts</span>
               </li>
@@ -126,14 +127,14 @@ export default function AdminStats({ apiFetch, showToast }) {
       <div className={styles.activityCols}>
         <ActivityCol title="Recent signups" rows={data.recent.signups.map((u) => ({
           key: `s-${u.id}`,
-          primary: u.display_name || u.username,
+          primary: fullDisplayName(u),
           meta: `joined ${timeAgo(u.created_at)} · ${u.status}`,
           link: `/profile?id=${u.id}`,
         }))} empty="No new accounts." />
 
         <ActivityCol title="Recent logins" rows={data.recent.logins.map((u) => ({
           key: `l-${u.id}`,
-          primary: u.display_name || u.username,
+          primary: fullDisplayName(u),
           meta: `logged in ${timeAgo(u.last_login_at)}`,
           link: `/profile?id=${u.id}`,
         }))} empty="No logins yet." />
@@ -141,7 +142,7 @@ export default function AdminStats({ apiFetch, showToast }) {
         <ActivityCol title="Latest posts" rows={data.recent.posts.map((p) => ({
           key: `p-${p.id}`,
           primary: p.title,
-          meta: `${p.display_rank || p.display_name || p.username} in ${p.category_name} · ${timeAgo(p.created_at)}`,
+          meta: `${p.display_rank || fullDisplayName(p)} in ${p.category_name} · ${timeAgo(p.created_at)}`,
           link: postUrlFromParts(p.id, p.title),
         }))} empty="No posts yet." />
       </div>

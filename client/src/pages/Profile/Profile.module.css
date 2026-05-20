@@ -66,6 +66,17 @@
   text-shadow: 0 0 20px rgba(212, 175, 55, 0.25);
 }
 
+.titleNameAlt {
+  font-family: var(--font-ui);
+  font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+  color: var(--color-text-secondary);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-shadow: none;
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
 .titleMeta {
   display: flex;
   flex-wrap: wrap;

@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { formatEventDate, formatEventTimeOnly, getTimezoneAbbr, utcToDate } from '../../utils/timezone';
+import { fullDisplayName } from '../../utils/userDisplay';
 import styles from './Events.module.css';
 
 const VALID_CATEGORIES = ['pvp', 'defense', 'social', 'raid'];
@@ -92,21 +93,24 @@ function AvatarStack({ users = [], totalGoing = 0, max = 6 }) {
   const remaining = Math.max(0, totalGoing - visible.length);
   return (
     <div className={styles.avatarStack} aria-label={`${totalGoing} going`}>
-      {visible.map((u) => (
-        <span
-          key={u.id}
-          className={styles.avatarStackItem}
-          title={u.display_name || u.username}
-        >
-          {u.avatar_url ? (
-            <img src={u.avatar_url} alt="" loading="lazy" />
-          ) : (
-            <span className={styles.avatarStackFallback}>
-              {(u.display_name || u.username || '?').slice(0, 1).toUpperCase()}
-            </span>
-          )}
-        </span>
-      ))}
+      {visible.map((u) => {
+        const label = fullDisplayName(u);
+        return (
+          <span
+            key={u.id}
+            className={styles.avatarStackItem}
+            title={label}
+          >
+            {u.avatar_url ? (
+              <img src={u.avatar_url} alt="" loading="lazy" />
+            ) : (
+              <span className={styles.avatarStackFallback}>
+                {(label || '?').slice(0, 1).toUpperCase()}
+              </span>
+            )}
+          </span>
+        );
+      })}
       {remaining > 0 && (
         <span className={`${styles.avatarStackItem} ${styles.avatarStackMore}`}>
           +{remaining}

@@ -28,7 +28,13 @@ router.put('/timezone', requireAuth, async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     const [users] = await pool.execute(
-      'SELECT id, username, display_name, avatar_url, `rank`, realm, character_name, discord_username, created_at FROM users WHERE id = ? AND status = ?',
+      `SELECT u.id, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm,
+              u.character_name, u.discord_username, u.created_at,
+              uc_main.character_name AS main_character_name,
+              uc_main.realm_slug AS main_realm_slug
+       FROM users u
+       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
+       WHERE u.id = ? AND u.status = ?`,
       [req.params.id, 'active']
     );
     if (users.length === 0) return res.status(404).json({ error: 'User not found' });

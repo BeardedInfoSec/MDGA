@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo, armoryUrl, formatNumber } from '../../utils/helpers';
 import { getTimezoneOptions } from '../../utils/timezone';
+import { primaryName, secondaryName } from '../../utils/userDisplay';
 import styles from './Profile.module.css';
 
 const WOW_CLASS_COLORS = {
@@ -71,7 +72,7 @@ export default function Profile() {
       .catch(() => {});
   }, []);
 
-  const displayName = profile?.user?.display_name || profile?.user?.username || 'Profile';
+  const displayName = primaryName(profile?.user) || 'Profile';
   useDocumentTitle(`${displayName} | MDGA`);
 
   const setOverlayStatus = (type, text) => {
@@ -344,17 +345,24 @@ export default function Profile() {
         <div className={styles.titleBandInner}>
           <img
             src={avatarSrc}
-            alt={profileUser.display_name || profileUser.username || 'Profile avatar'}
+            alt={primaryName(profileUser) || 'Profile avatar'}
             className={styles.titleAvatar}
           />
           <div className={styles.titleInfo}>
             <span className={styles.titleEyebrow}>
               {isOwnProfile ? 'Your profile' : 'Member profile'}
             </span>
-            <h1 className={styles.titleName}>{profileUser.display_name || profileUser.username}</h1>
+            <h1 className={styles.titleName}>
+              {primaryName(profileUser)}
+              {secondaryName(profileUser) && (
+                <span className={styles.titleNameAlt}> ({secondaryName(profileUser)})</span>
+              )}
+            </h1>
             <div className={styles.titleMeta}>
               <span className={`rank-badge rank-badge--${profileUser.rank}`}>{profileUser.display_rank || profileUser.rank}</span>
-              {profileUser.discord_username ? (
+              {/* Discord identity now appears in the title's parens line — skip
+                  the duplicate Discord chip when secondaryName already rendered. */}
+              {profileUser.discord_username && !secondaryName(profileUser) ? (
                 <span className={styles.titleMetaItem}>Discord: {profileUser.discord_username}</span>
               ) : null}
               <span className={styles.titleMetaItem}>

@@ -77,9 +77,11 @@ router.get('/', async (req, res) => {
       const ids = rows.map((r) => r.id);
       const placeholders = ids.map(() => '?').join(',');
       const [going] = await pool.execute(
-        `SELECT er.event_id, u.id, u.username, u.display_name, u.avatar_url
+        `SELECT er.event_id, u.id, u.username, u.display_name, u.discord_username, u.avatar_url,
+                uc_main.character_name AS main_character_name
          FROM event_rsvps er
          JOIN users u ON u.id = er.user_id
+         LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
          WHERE er.event_id IN (${placeholders}) AND er.status = 'going'
          ORDER BY er.created_at ASC`,
         ids
@@ -88,7 +90,11 @@ router.get('/', async (req, res) => {
       for (const g of going) {
         const arr = goingByEvent.get(g.event_id) || [];
         if (arr.length < 8) {
-          arr.push({ id: g.id, username: g.username, display_name: g.display_name, avatar_url: g.avatar_url });
+          arr.push({
+            id: g.id, username: g.username, display_name: g.display_name,
+            discord_username: g.discord_username, avatar_url: g.avatar_url,
+            main_character_name: g.main_character_name,
+          });
         }
         goingByEvent.set(g.event_id, arr);
       }
