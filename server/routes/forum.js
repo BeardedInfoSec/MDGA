@@ -1360,15 +1360,30 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
         [postId]
       );
       if (postRow) {
+        // Best-effort: pull literal alternations out of the regex so we
+        // can show "MDGA!" / "MEGA!" instead of leaking the raw pattern
+        // to non-technical Discord readers. Anything fancier than
+        // ^(a|b|c)<optional suffix>$ falls through to a generic prompt.
+        const altMatch = validPattern.match(/^\^\(([^)]+)\)([^()]*)\$$/);
+        let replyHint;
+        if (altMatch) {
+          const alts = altMatch[1].split('|').map((a) => `\`${a}${altMatch[2] || ''}\``);
+          replyHint = `Reply with ${alts.join(' or ')} to enter.`;
+        } else {
+          replyHint = 'See the post for entry rules.';
+        }
         const cooldownNote = rateLimitSeconds > 0
-          ? `\n**Reply cooldown:** ${Math.round(rateLimitSeconds / 60)} minute(s) per account.`
+          ? ` Replies are rate-limited to once every ${Math.round(rateLimitSeconds / 60)} minute(s) per account.`
           : '';
+        const slotPhrase = dedupSorted.length === 1
+          ? `Comment **#${dedupSorted[0]}** wins.`
+          : `Comments at positions **${dedupSorted.join(', ')}** win.`;
         setImmediate(() => sendDiscordAnnouncement(
           channelId,
-          'Giveaway started',
+          `Giveaway started: ${postRow.title}`,
           [
-            `**${postRow.title}**`,
-            `Comment positions **${dedupSorted.join(', ')}** win. Reply matching \`${validPattern}\` to enter.${cooldownNote}`,
+            `${slotPhrase} ${replyHint}${cooldownNote}`,
+            ``,
             `https://mdga.gg/forum/post/${postId}`,
           ].join('\n'),
           0xD4AF37
