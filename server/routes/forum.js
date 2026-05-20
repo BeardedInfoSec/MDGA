@@ -1330,6 +1330,16 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
     const rawChannel = String(req.body.channel_id || '').trim();
     const channelId = /^\d{15,25}$/.test(rawChannel) ? rawChannel : null;
 
+    // Detect whether this is the first config save for the post so we
+    // only fire the "giveaway started" announcement once. Subsequent
+    // edits (e.g. fixing the channel ID or extending positions) should
+    // not re-announce.
+    const [[existingCfg]] = await pool.execute(
+      'SELECT post_id FROM giveaway_configs WHERE post_id = ?',
+      [postId]
+    );
+    const isNewConfig = !existingCfg;
+
     await pool.execute(
       `INSERT INTO giveaway_configs (post_id, target_positions, valid_pattern, rate_limit_seconds, channel_id, created_by)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -1340,7 +1350,33 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
          channel_id = VALUES(channel_id)`,
       [postId, JSON.stringify(dedupSorted), validPattern, rateLimitSeconds, channelId, req.user.id]
     );
-    res.json({ message: 'Giveaway config saved', target_positions: dedupSorted });
+
+    // Kickoff announcement (forum giveaway followup). Posts to the same
+    // channel that winners will land in, so members see "drop started"
+    // and "slot N filled" in the same conversation.
+    if (isNewConfig) {
+      const [[postRow]] = await pool.execute(
+        'SELECT id, title FROM forum_posts WHERE id = ?',
+        [postId]
+      );
+      if (postRow) {
+        const cooldownNote = rateLimitSeconds > 0
+          ? `\n**Reply cooldown:** ${Math.round(rateLimitSeconds / 60)} minute(s) per account.`
+          : '';
+        setImmediate(() => sendDiscordAnnouncement(
+          channelId,
+          'Giveaway started',
+          [
+            `**${postRow.title}**`,
+            `Comment positions **${dedupSorted.join(', ')}** win. Reply matching \`${validPattern}\` to enter.${cooldownNote}`,
+            `https://mdga.gg/forum/post/${postId}`,
+          ].join('\n'),
+          0xD4AF37
+        ).catch((err) => console.error('Giveaway kickoff announcement failed:', err.message)));
+      }
+    }
+
+    res.json({ message: 'Giveaway config saved', target_positions: dedupSorted, announced_start: isNewConfig });
   } catch (err) {
     console.error('Save giveaway error:', err);
     res.status(500).json({ error: 'Failed to save giveaway config' });

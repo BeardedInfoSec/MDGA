@@ -26,7 +26,7 @@ const REPLY_MAX = 5000;
 export default function ForumPost() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { isLoggedIn, isOfficer, user, apiFetch } = useAuth();
+  const { isLoggedIn, isOfficer, hasPermission, user, apiFetch } = useAuth();
 
   const [allCategories, setAllCategories] = useState([]);
   const [post, setPost] = useState(null);
@@ -646,12 +646,17 @@ export default function ForumPost() {
               </div>
             </div>
 
-            {/* Owner / Officer actions */}
-            {(isAuthor || showOfficerActions) && (
+            {/* Owner / Officer / Permissioned actions. The Giveaway button
+                only needs the forum.manage_giveaway perm (granted to
+                website_guru), so it's checked separately from the
+                officer-only pin / lock / revisions cluster. */}
+            {(isAuthor || showOfficerActions || hasPermission('forum.manage_giveaway')) && (
               <div className={styles.postOwnerActions}>
-                <button type="button" className="btn btn--secondary btn--sm" onClick={openEditPost}>
-                  Edit post
-                </button>
+                {(isAuthor || showOfficerActions) && (
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={openEditPost}>
+                    Edit post
+                  </button>
+                )}
                 {showOfficerActions && (
                   <>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={handleTogglePin}>
@@ -668,15 +673,19 @@ export default function ForumPost() {
                     >
                       Revisions{post.revision_count > 0 ? ` (${post.revision_count})` : ''}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn--secondary btn--sm"
-                      onClick={openGiveaway}
-                      title="Configure giveaway automation (first / Nth comment wins)"
-                    >Giveaway</button>
                   </>
                 )}
-                <button type="button" className="btn btn--danger btn--sm" onClick={handleDeletePost}>Delete post</button>
+                {(showOfficerActions || hasPermission('forum.manage_giveaway')) && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={openGiveaway}
+                    title="Configure giveaway automation (first / Nth comment wins)"
+                  >Giveaway</button>
+                )}
+                {(isAuthor || showOfficerActions) && (
+                  <button type="button" className="btn btn--danger btn--sm" onClick={handleDeletePost}>Delete post</button>
+                )}
               </div>
             )}
           </article>
