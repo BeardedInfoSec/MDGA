@@ -404,6 +404,7 @@ router.post('/posts', requireAuth, async (req, res) => {
     // regardless of server or viewer browser zone. Without it we fall
     // back to JS Date parsing (browser-local).
     let publishAtValue = null;
+    let publishTimezoneValue = null;
     if (publishAt) {
       let parsedMs;
       const tz = (req.body.publishTimezone || '').trim();
@@ -412,6 +413,7 @@ router.post('/posts', requireAuth, async (req, res) => {
         if (!dt.isValid) return res.status(400).json({ error: 'Invalid publishAt / publishTimezone' });
         parsedMs = dt.toMillis();
         publishAtValue = dt.toUTC().toFormat('yyyy-MM-dd HH:mm:ss');
+        publishTimezoneValue = tz;
       } else {
         const parsed = new Date(publishAt);
         if (Number.isNaN(parsed.getTime())) {
@@ -444,8 +446,8 @@ router.post('/posts', requireAuth, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue]
+      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at, publish_timezone) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue, publishTimezoneValue]
     );
     const newPostId = result.insertId;
     // Multi-image attachments (forum #29). The single image_url stays
@@ -1285,18 +1287,21 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
     //   string     -> new local wall-clock; needs publishTimezone too
     const wantsScheduleUpdate = Object.prototype.hasOwnProperty.call(req.body, 'publishAt');
     let newPublishAtSql = undefined;
+    let newPublishTimezone = null;
     if (wantsScheduleUpdate) {
       if (!canSeeScheduled(req.user)) {
         return res.status(403).json({ error: 'Not authorized to change publish time' });
       }
       if (req.body.publishAt === null || req.body.publishAt === '') {
         newPublishAtSql = null;
+        newPublishTimezone = null;
       } else {
         const tz = (req.body.publishTimezone || '').trim();
         if (tz) {
           const dt = DateTime.fromISO(String(req.body.publishAt).trim(), { zone: tz });
           if (!dt.isValid) return res.status(400).json({ error: 'Invalid publishAt / publishTimezone' });
           newPublishAtSql = dt.toUTC().toFormat('yyyy-MM-dd HH:mm:ss');
+          newPublishTimezone = tz;
         } else {
           const parsed = new Date(req.body.publishAt);
           if (Number.isNaN(parsed.getTime())) {
@@ -1318,8 +1323,8 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
     }
     if (wantsScheduleUpdate) {
       await pool.execute(
-        'UPDATE forum_posts SET title = ?, content = ?, publish_at = ?, updated_at = NOW() WHERE id = ?',
-        [cleanTitle, cleanContent, newPublishAtSql, id]
+        'UPDATE forum_posts SET title = ?, content = ?, publish_at = ?, publish_timezone = ?, updated_at = NOW() WHERE id = ?',
+        [cleanTitle, cleanContent, newPublishAtSql, newPublishTimezone, id]
       );
       // Reset kickoff/warning state so the scheduler can re-announce
       // against the new publish moment. (No-op if no giveaway config.)

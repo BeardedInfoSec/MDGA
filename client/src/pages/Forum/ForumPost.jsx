@@ -88,13 +88,16 @@ export default function ForumPost() {
     setEditContent(post.content || '');
     setEditError('');
     // Seed the schedule fields from whatever the server stored. publish_at
-    // comes back as UTC; render it in the previously-set TZ so officers
-    // see the same wall-clock they originally typed. Falls back to the
-    // browser's IANA zone for posts saved before TZ-awareness shipped.
+    // is the UTC instant; publish_timezone (added in migration-064) is the
+    // IANA zone the officer originally picked. Prefer the saved zone so the
+    // wall-clock survives re-opens across officers/browsers. Falls back to
+    // the current editPublishTz state (browser-detected) for legacy posts
+    // saved before that column existed.
     if (post.publish_at) {
       try {
         const d = new Date(post.publish_at);
-        const tz = editPublishTz;
+        const tz = post.publish_timezone || editPublishTz;
+        if (post.publish_timezone) setEditPublishTz(post.publish_timezone);
         const parts = new Intl.DateTimeFormat('en-CA', {
           timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit', hour12: false,
