@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { timeAgo, armoryUrl } from '../../utils/helpers';
@@ -29,13 +29,20 @@ const REPLY_MAX = 5000;
 export default function ForumPost() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { isLoggedIn, isOfficer, hasPermission, user, apiFetch } = useAuth();
 
   const [allCategories, setAllCategories] = useState([]);
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentsPagination, setCommentsPagination] = useState(null);
-  const [commentsPage, setCommentsPage] = useState(1);
+  // Honor ?comments_page=N from the URL (notifications deep-link to the
+  // page containing the mentioned comment). Default 1 if missing.
+  const [commentsPage, setCommentsPage] = useState(() => {
+    const p = parseInt(searchParams.get('comments_page'), 10);
+    return Number.isInteger(p) && p > 0 ? p : 1;
+  });
   const COMMENTS_PER_PAGE = 25;
   // Live count polled every 15s while the post is open so the engagement
   // bar ticks up without a manual reload (helps during giveaways).
@@ -204,6 +211,25 @@ export default function ForumPost() {
   }, [id, isLoggedIn, apiFetch, commentsPage]);
 
   useEffect(() => { loadPost(); }, [loadPost]);
+
+  // Scroll to a specific comment when the URL hash is `#comment-NN`
+  // (notification deep links use this format). Wait for the comments
+  // array to actually contain the target before scrolling — otherwise
+  // the page jumps before the row exists in the DOM. Highlight briefly
+  // so the user's eye finds it on a busy thread.
+  useEffect(() => {
+    const hash = location.hash || '';
+    const m = hash.match(/^#comment-(\d+)$/);
+    if (!m) return;
+    const targetId = m[1];
+    if (!comments.some((c) => String(c.id) === targetId)) return;
+    const el = document.getElementById(`comment-${targetId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('comment-highlight');
+    const t = setTimeout(() => el.classList.remove('comment-highlight'), 2500);
+    return () => clearTimeout(t);
+  }, [location.hash, comments]);
 
   // Live counter: poll just the count (not the full post payload) every
   // 15s. We only refresh the visible comments when the user is on the
@@ -847,7 +873,7 @@ export default function ForumPost() {
                   const cMainChar = c.main_character_name || c.character_name;
                   const cIsAuthor = user && user.id === c.user_id;
                   return (
-                    <li key={c.id} className={styles.commentRow}>
+                    <li key={c.id} id={`comment-${c.id}`} className={styles.commentRow}>
                       {cProfileLink ? (
                         <Link to={cProfileLink} className={styles.commentAvatarLink}>
                           <img

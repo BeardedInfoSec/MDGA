@@ -785,7 +785,19 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
           );
           if (!postRow) return;
           const postTitle = String(postRow.title || '').slice(0, 80);
-          const linkUrl = `/forum/post/${postId}`;
+
+          // Build a deep link that lands on the specific comment. The
+          // post page paginates comments at 25/page (COMMENTS_PER_PAGE
+          // in ForumPost.jsx); the newest comment is always on the
+          // last page. Count live comments up to + including this one
+          // to compute the page, then anchor on the comment id.
+          const [[posRow]] = await pool.execute(
+            'SELECT COUNT(*) AS total FROM forum_comments WHERE post_id = ? AND deleted_at IS NULL',
+            [postId]
+          );
+          const COMMENTS_PER_PAGE = 25;
+          const page = Math.max(1, Math.ceil((posRow?.total || 1) / COMMENTS_PER_PAGE));
+          const linkUrl = `/forum/post/${postId}?comments_page=${page}#comment-${newCommentId}`;
 
           const mentioned = await notifyMentions({
             text: content,

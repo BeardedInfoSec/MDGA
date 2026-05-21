@@ -613,3 +613,15 @@ strong {
   .section { padding: var(--space-8) 0; }
   .container { padding: 0 var(--space-4); }
 }
+
+/* Highlight pulse for a deep-linked forum comment (notifications use
+   `#comment-NN` to jump to the exact reply that mentioned the user).
+   Adds a brief gold flash so their eye lands on the right row. */
+@keyframes mdga-comment-highlight {
+  0%   { background: rgba(212, 175, 55, 0.25); box-shadow: 0 0 0 2px var(--color-gold) inset; }
+  100% { background: transparent; box-shadow: none; }
+}
+.comment-highlight {
+  animation: mdga-comment-highlight 2.5s ease-out;
+  border-radius: var(--border-radius-sm);
+}
