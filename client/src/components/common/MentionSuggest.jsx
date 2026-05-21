@@ -25,8 +25,13 @@ export default function MentionSuggest({ textareaId, value, onChange, apiFetch }
     if (!ta) return undefined;
 
     const handler = async () => {
+      // Read directly from the DOM, not from React state — the native
+      // `input` event fires BEFORE React commits the onChange update,
+      // so the closure's `value` lags by one character. Using ta.value
+      // ensures the trigger detection works on the very first @ keystroke.
+      const currentValue = ta.value;
       const caret = ta.selectionStart;
-      const before = value.slice(0, caret);
+      const before = currentValue.slice(0, caret);
       const m = before.match(TRIGGER_RE);
       if (!m) {
         setOpen(false);
@@ -75,19 +80,25 @@ export default function MentionSuggest({ textareaId, value, onChange, apiFetch }
 
   function insertMention(user) {
     if (!user || !tokenRange) return;
+    // Use the live DOM value for the splice base, not the closure's
+    // `value`. The user may have typed additional chars between when
+    // the dropdown opened and when they clicked; React state may lag
+    // by a keystroke. ta.value is always current.
+    const ta = document.getElementById(textareaId);
+    const base = ta ? ta.value : value;
     const [start, end] = tokenRange;
     const label = user.main_character_name || user.display_name || user.username;
     const inserted = `[@${label}](/profile?id=${user.id}) `;
-    const next = value.slice(0, start) + inserted + value.slice(end);
+    const next = base.slice(0, start) + inserted + base.slice(end);
     onChange(next);
     setOpen(false);
     // Restore caret after the inserted markdown so the user can keep typing.
     setTimeout(() => {
-      const ta = document.getElementById(textareaId);
-      if (ta) {
+      const ta2 = document.getElementById(textareaId);
+      if (ta2) {
         const pos = start + inserted.length;
-        ta.focus();
-        ta.setSelectionRange(pos, pos);
+        ta2.focus();
+        ta2.setSelectionRange(pos, pos);
       }
     }, 0);
   }
