@@ -6,6 +6,7 @@ import { timeAgo, armoryUrl, formatNumber } from '../../utils/helpers';
 import { getTimezoneOptions } from '../../utils/timezone';
 import { primaryName, secondaryName } from '../../utils/userDisplay';
 import GuildFlag from '../../components/common/GuildFlag';
+import NotificationPrefs from '../../components/common/NotificationPrefs';
 import styles from './Profile.module.css';
 
 const WOW_CLASS_COLORS = {
@@ -853,6 +854,8 @@ export default function Profile() {
             </div>
           )}
         </section>
+
+        {isOwnProfile && <NotificationPrefs />}
 
       </div>{/* /.body */}
 

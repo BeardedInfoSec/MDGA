@@ -2,8 +2,40 @@
 // Notification service — fanout-on-write inserts into `notifications`
 // (migration-067) plus the @mention parser shared by post + comment
 // create paths. Read endpoints live in routes/notifications.js.
+//
+// Real-time delivery: after every insert we publish to the SSE pub/sub
+// in notification-stream.js. Connected clients see the new entry
+// immediately; the bell's 30s polling fallback covers anyone whose
+// stream temporarily disconnected.
 // ================================================
 const pool = require('../db');
+const stream = require('./notification-stream');
+
+const DEFAULT_PREFS = Object.freeze({
+  mention: true,
+  reply: true,
+  event: true,
+  giveaway_kickoff: true,
+});
+
+// Returns the user's effective preferences (merged with defaults).
+// Cheap — one SELECT per call. createNotification batches a couple of
+// queries already; this is one more.
+async function getUserPrefs(userId) {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT notification_prefs FROM users WHERE id = ?',
+      [userId]
+    );
+    if (rows.length === 0) return DEFAULT_PREFS;
+    const raw = rows[0].notification_prefs;
+    if (!raw) return DEFAULT_PREFS;
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return { ...DEFAULT_PREFS, ...parsed };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
 
 // Matches @<name> tokens — must be at start-of-string OR preceded by
 // whitespace, must be followed by a word boundary. Name char class:
@@ -71,21 +103,54 @@ async function createNotification({ userId, type, actorId = null, sourceType = n
   if (!userId || !type || !title || !linkUrl) return null;
   if (actorId && Number(actorId) === Number(userId)) return null; // don't notify yourself
   try {
-    const [dupe] = await pool.execute(
-      `SELECT id FROM notifications
-        WHERE user_id = ? AND type = ?
-          AND (source_type <=> ?) AND (source_id <=> ?)
-          AND (actor_id <=> ?)
-          AND created_at >= NOW() - INTERVAL 30 MINUTE
-        LIMIT 1`,
-      [userId, type, sourceType, sourceId, actorId]
-    );
-    if (dupe.length > 0) return dupe[0].id;
+    // Honor the recipient's prefs — if they've muted this type, no insert.
+    const prefs = await getUserPrefs(userId);
+    if (prefs[type] === false) return null;
+
+    // Mentions are deduped only over a very short window (10s) so a fast
+    // typo-retype on a fresh post doesn't double-fire, but the user still
+    // gets near-immediate delivery on subsequent mentions in other posts.
+    // Other types use a longer 30-minute window to coalesce edit storms.
+    const dedupeMinutes = type === 'mention' ? 0 : 30;
+    if (dedupeMinutes > 0) {
+      const [dupe] = await pool.execute(
+        `SELECT id FROM notifications
+          WHERE user_id = ? AND type = ?
+            AND (source_type <=> ?) AND (source_id <=> ?)
+            AND (actor_id <=> ?)
+            AND created_at >= NOW() - INTERVAL ? MINUTE
+          LIMIT 1`,
+        [userId, type, sourceType, sourceId, actorId, dedupeMinutes]
+      );
+      if (dupe.length > 0) return dupe[0].id;
+    } else {
+      // Even mentions get a 10-second window to absorb rapid re-edits
+      // from the same actor referencing the same post/comment.
+      const [dupe] = await pool.execute(
+        `SELECT id FROM notifications
+          WHERE user_id = ? AND type = ?
+            AND (source_type <=> ?) AND (source_id <=> ?)
+            AND (actor_id <=> ?)
+            AND created_at >= NOW() - INTERVAL 10 SECOND
+          LIMIT 1`,
+        [userId, type, sourceType, sourceId, actorId]
+      );
+      if (dupe.length > 0) return dupe[0].id;
+    }
+
     const [result] = await pool.execute(
       `INSERT INTO notifications (user_id, type, actor_id, source_type, source_id, title, link_url)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [userId, type, actorId, sourceType, sourceId, title.slice(0, 200), linkUrl.slice(0, 500)]
     );
+    // Real-time push to the user's open bell (if connected).
+    stream.publishToUser(userId, {
+      id: result.insertId,
+      type, actorId, sourceType, sourceId,
+      title: title.slice(0, 200),
+      linkUrl: linkUrl.slice(0, 500),
+      created_at: new Date().toISOString(),
+    });
     return result.insertId;
   } catch (err) {
     console.error('[notifications] createNotification failed:', err.message);
@@ -98,16 +163,30 @@ async function createNotification({ userId, type, actorId = null, sourceType = n
 // no Discord link (likely orphan accounts). Returns the count inserted.
 async function broadcastNotification({ type, actorId = null, sourceType = null, sourceId = null, title, linkUrl }) {
   try {
+    // Pull recipients AND their prefs in one go, then filter in JS.
+    // For ~hundreds of members this is cheaper than N getUserPrefs calls.
     const [rows] = await pool.execute(
-      `SELECT id FROM users WHERE status = 'active' AND discord_id IS NOT NULL
+      `SELECT id, notification_prefs FROM users
+        WHERE status = 'active' AND discord_id IS NOT NULL
         ${actorId ? 'AND id != ?' : ''}`,
       actorId ? [actorId] : []
     );
     if (rows.length === 0) return 0;
+    const eligible = rows.filter((r) => {
+      if (!r.notification_prefs) return true;
+      try {
+        const p = typeof r.notification_prefs === 'string'
+          ? JSON.parse(r.notification_prefs)
+          : r.notification_prefs;
+        return p[type] !== false;
+      } catch { return true; }
+    });
+    if (eligible.length === 0) return 0;
+
     // Bulk insert — single statement, much cheaper than N round-trips.
-    const valuesSql = rows.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+    const valuesSql = eligible.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
     const params = [];
-    for (const r of rows) {
+    for (const r of eligible) {
       params.push(r.id, type, actorId, sourceType, sourceId, title.slice(0, 200), linkUrl.slice(0, 500));
     }
     await pool.execute(
@@ -115,7 +194,16 @@ async function broadcastNotification({ type, actorId = null, sourceType = null, 
        VALUES ${valuesSql}`,
       params
     );
-    return rows.length;
+    // Real-time push to every connected user. The payload is generic
+    // (no per-user id) — the client refetches the list when it sees
+    // a notification event arrive, so this is purely a "wake up" ping.
+    stream.publishToAll({
+      type, actorId, sourceType, sourceId,
+      title: title.slice(0, 200),
+      linkUrl: linkUrl.slice(0, 500),
+      created_at: new Date().toISOString(),
+    });
+    return eligible.length;
   } catch (err) {
     console.error('[notifications] broadcastNotification failed:', err.message);
     return 0;

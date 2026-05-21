@@ -85,6 +85,12 @@ app.use('/api/events', require('./routes/events'));
 app.use('/api/applications', require('./routes/applications'));
 app.use('/api/forum', require('./routes/forum'));
 app.use('/api/notifications', require('./routes/notifications'));
+// SSE heartbeat — keeps long-lived connections from being closed by
+// intermediary proxies that timeout silent streams.
+require('./services/notification-stream').startHeartbeat();
+// Periodic scheduler that fires the 'event' broadcast when a scheduled
+// event's publish_at lands. Self-starts on require.
+require('./services/event-publish-scheduler');
 app.use('/api/users', require('./routes/users'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/characters', require('./routes/characters'));

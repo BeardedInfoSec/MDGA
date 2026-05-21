@@ -7,12 +7,18 @@ import styles from './NotificationBell.module.css';
 
 const POLL_MS = 30 * 1000;
 
-// Bell icon + dropdown for in-app notifications. Polls the unread-count
-// endpoint every 30s so the badge stays current without us standing up a
-// websocket layer just for this. The dropdown lazy-loads the full list
-// the first time it opens, and re-loads every time it re-opens.
+// Bell icon + dropdown for in-app notifications. Two delivery paths:
+//   1. SSE stream (/api/notifications/stream?token=...) — server pushes
+//      new notifications as they're inserted, so mentions and broadcasts
+//      land immediately. The 'notification' event handler bumps the
+//      unread counter and refreshes the list if the dropdown is open.
+//   2. 30s polling fallback — covers SSE outages (proxy timeouts,
+//      network blips, tab in the background where the stream got
+//      paused). Cheap; just a count endpoint.
+// The dropdown lazy-loads the full list the first time it opens, and
+// re-fetches each time it re-opens.
 export default function NotificationBell() {
-  const { isLoggedIn, apiFetch } = useAuth();
+  const { isLoggedIn, apiFetch, token } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -45,13 +51,39 @@ export default function NotificationBell() {
     }
   }, [isLoggedIn, apiFetch]);
 
-  // Poll unread count
+  // Poll unread count — fallback / heartbeat. The SSE stream below is
+  // what makes new notifications appear in real time; this poll catches
+  // anything missed (proxy hiccups, background tabs that paused the
+  // stream, etc.).
   useEffect(() => {
     if (!isLoggedIn) return undefined;
     fetchCount();
     const t = setInterval(fetchCount, POLL_MS);
     return () => clearInterval(t);
   }, [isLoggedIn, fetchCount]);
+
+  // SSE: real-time push from the server. New 'notification' events bump
+  // the unread count and refresh the list if the dropdown is open. The
+  // browser auto-reconnects on a dropped EventSource.
+  useEffect(() => {
+    if (!isLoggedIn || !token || typeof window === 'undefined' || !('EventSource' in window)) {
+      return undefined;
+    }
+    const url = `/api/notifications/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    es.addEventListener('notification', () => {
+      setUnread((u) => u + 1);
+      // If the dropdown is already showing, refetch so the new row appears.
+      // Pulled from state via the ref-like pattern: use the latest open value.
+      setOpen((wasOpen) => { if (wasOpen) fetchList(); return wasOpen; });
+    });
+    es.onerror = () => {
+      // EventSource auto-reconnects on transient errors. If the server
+      // returns 401 (e.g. JWT expired), it'll keep retrying and the
+      // poll continues to keep the count honest.
+    };
+    return () => es.close();
+  }, [isLoggedIn, token, fetchList]);
 
   // Re-fetch list every time the dropdown opens
   useEffect(() => {
