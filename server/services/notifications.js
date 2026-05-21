@@ -101,7 +101,9 @@ function extractMentionedNames(text) {
 // target a second time, and lets the giveaway scheduler retry safely.
 async function createNotification({ userId, type, actorId = null, sourceType = null, sourceId = null, title, linkUrl }) {
   if (!userId || !type || !title || !linkUrl) return null;
-  if (actorId && Number(actorId) === Number(userId)) return null; // don't notify yourself
+  // Self-mentions / self-replies: previously skipped, but per request
+  // (forum #-): allowed. Useful for testing your own notification
+  // pipeline and harmless in practice (you @ yourself, you see a notif).
   try {
     // Honor the recipient's prefs — if they've muted this type, no insert.
     const prefs = await getUserPrefs(userId);
