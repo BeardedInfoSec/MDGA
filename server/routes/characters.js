@@ -130,9 +130,13 @@ router.post('/lookup', requireAuth, async (req, res) => {
     console.log(`[Character lookup] Searching for ${characterName} on ${slug}`);
     let profile = await fetchCharacterProfile(slug, characterName);
 
-    // Alt-coded-name fallback: if the direct slug returned nothing, check our
-    // cached federation roster for a folded-ASCII match. This lets users find
-    // characters like "Nornë" by typing "Norne".
+    // Blizzard miss → fall back to our cached federation roster. This serves
+    // two cases: alt-coded names the user can't type exactly (Nornë typed
+    // as "Norne"), AND characters whose Blizzard profile is unavailable
+    // (Classic-tier members, inactive accounts) but who DO appear on the
+    // guild roster endpoint. In the second case we trust the roster as the
+    // source of truth — no point re-asking Blizzard for data we know
+    // doesn't exist.
     if (!profile) {
       const { matches } = await fuzzyMatchRoster(pool, characterName);
       if (matches.length === 0) {
@@ -153,14 +157,29 @@ router.post('/lookup', requireAuth, async (req, res) => {
           })),
         });
       }
-      // Exactly one match — re-fetch the live profile with the exact name +
-      // realm from the roster so downstream syncs use canonical values.
+      // Exactly one match — return the roster row as the validated character
+      // (no second Blizzard call). The frontend will hit
+      // /api/characters/from-roster on save, which handles the no-live-
+      // profile case gracefully. Surfacing viaRoster=true lets the UI tell
+      // the user we couldn't pull a live armory snapshot.
       const only = matches[0];
-      console.log(`[Character lookup] Fuzzy fallback resolved "${characterName}" → ${only.character_name} on ${only.realm_slug}`);
-      profile = await fetchCharacterProfile(only.realm_slug, only.character_name);
-      if (!profile) {
-        return res.status(404).json({ error: 'Character not found on World of Warcraft Armory' });
-      }
+      console.log(`[Character lookup] Fuzzy fallback resolved "${characterName}" → ${only.character_name} on ${only.realm_slug} (roster-only, no live profile)`);
+      return res.json({
+        character: {
+          characterName: only.character_name,
+          realm: only.realm_name || only.realm_slug,
+          realmSlug: only.realm_slug,
+          class: only.class || null,
+          spec: null,
+          level: only.level || null,
+          race: only.race || null,
+          itemLevel: null,
+          mediaUrl: null,
+          guildName: only.guild_name || null,
+          faction: only.faction || null,
+        },
+        viaRoster: true,
+      });
     }
 
     // Guild verification — accept any character whose guild NAME matches one

@@ -55,6 +55,7 @@ export default function Profile() {
   const [overlayRealm, setOverlayRealm] = useState('');
   const [overlayIsMain, setOverlayIsMain] = useState(false);
   const [overlayValidatedCharacter, setOverlayValidatedCharacter] = useState(null);
+  const [overlayValidatedViaRoster, setOverlayValidatedViaRoster] = useState(false);
   const [overlayStatusType, setOverlayStatusType] = useState('');
   const [overlayStatusText, setOverlayStatusText] = useState('');
   const [overlaySearching, setOverlaySearching] = useState(false);
@@ -91,6 +92,7 @@ export default function Profile() {
 
   const clearOverlayValidation = useCallback(() => {
     setOverlayValidatedCharacter(null);
+    setOverlayValidatedViaRoster(false);
     setOverlayCandidates([]);
   }, []);
 
@@ -217,13 +219,19 @@ export default function Profile() {
       }
 
       setOverlayValidatedCharacter(data.character || null);
+      setOverlayValidatedViaRoster(!!data.viaRoster);
       if (data.character?.characterName) {
         setOverlayName(data.character.characterName);
       }
       if (data.character?.realm) {
         setOverlayRealm(data.character.realm);
       }
-      setOverlayStatus('success', 'Character validated. Review details and save.');
+      setOverlayStatus(
+        'success',
+        data.viaRoster
+          ? 'Found in our guild roster. Live armory snapshot unavailable for this character — name, class, race, level, and guild will be saved.'
+          : 'Character validated. Review details and save.'
+      );
     } catch {
       setOverlayStatus('error', 'Failed to validate character.');
     } finally {
@@ -347,20 +355,31 @@ export default function Profile() {
     setOverlayStatus('', '');
 
     try {
-      const res = await apiFetch('/characters', {
+      // If /lookup found this character only via the guild roster fallback
+      // (Blizzard's profile API 404'd), POST /api/characters would 404 too.
+      // Route to /from-roster, which trusts our cached roster row.
+      const endpoint = overlayValidatedViaRoster ? '/characters/from-roster' : '/characters';
+      const body = overlayValidatedViaRoster
+        ? {
+            characterName: overlayValidatedCharacter.characterName,
+            realmSlug: overlayValidatedCharacter.realmSlug,
+            isMain: overlayIsMain,
+          }
+        : {
+            characterName: overlayValidatedCharacter.characterName,
+            realm: overlayValidatedCharacter.realm,
+            realmSlug: overlayValidatedCharacter.realmSlug || undefined,
+            class: overlayValidatedCharacter.class || undefined,
+            spec: overlayValidatedCharacter.spec || undefined,
+            level: overlayValidatedCharacter.level || undefined,
+            race: overlayValidatedCharacter.race || undefined,
+            itemLevel: overlayValidatedCharacter.itemLevel || undefined,
+            mediaUrl: overlayValidatedCharacter.mediaUrl || undefined,
+            isMain: overlayIsMain,
+          };
+      const res = await apiFetch(endpoint, {
         method: 'POST',
-        body: JSON.stringify({
-          characterName: overlayValidatedCharacter.characterName,
-          realm: overlayValidatedCharacter.realm,
-          realmSlug: overlayValidatedCharacter.realmSlug || undefined,
-          class: overlayValidatedCharacter.class || undefined,
-          spec: overlayValidatedCharacter.spec || undefined,
-          level: overlayValidatedCharacter.level || undefined,
-          race: overlayValidatedCharacter.race || undefined,
-          itemLevel: overlayValidatedCharacter.itemLevel || undefined,
-          mediaUrl: overlayValidatedCharacter.mediaUrl || undefined,
-          isMain: overlayIsMain,
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
