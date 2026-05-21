@@ -5,6 +5,7 @@ const { fetchCharacterProfile } = require('../blizzard');
 const { refreshCharacter } = require('../services/character-sync');
 const { setMemberNickname } = require('../bot');
 const guildRegistry = require('../services/guild-registry');
+const { foldAscii } = require('../utils/diacritics');
 
 const router = express.Router();
 
@@ -84,6 +85,33 @@ function realmSlug(realmName) {
   return aliases[normalized] || normalized;
 }
 
+// Fuzzy fallback for character lookup when the direct Blizzard slug fails.
+// WoW names commonly contain alt-coded glyphs (Nornë, Þràll, Bjørn) that
+// users can't type from a normal keyboard. We index our federation guild
+// rosters in `guild_members`, so we can search the closed set by folding
+// both sides to plain ASCII and matching.
+//
+// Behavior:
+//   - 0 matches → null (caller returns 404 as today)
+//   - 1 match   → returns { single: row } and caller proceeds to re-fetch
+//                 the live profile with the exact name+realm from the row
+//   - >1 match  → returns { candidates: [...] } and caller responds with
+//                 the list for the UI to render a picker
+async function fuzzyMatchRoster(pool, name) {
+  const target = foldAscii(name);
+  if (!target || target.length < 2) return { matches: [] };
+  const [rows] = await pool.execute(
+    `SELECT gm.character_name, gm.realm_slug, gm.realm_name,
+            gm.class, gm.race, gm.level,
+            g.name AS guild_name, g.faction
+     FROM guild_members gm
+     JOIN guilds g ON g.id = gm.guild_id
+     WHERE gm.is_banned = 0`
+  );
+  const matches = rows.filter((r) => foldAscii(r.character_name) === target);
+  return { matches };
+}
+
 // POST /api/characters/lookup
 router.post('/lookup', requireAuth, async (req, res) => {
   try {
@@ -100,9 +128,39 @@ router.post('/lookup', requireAuth, async (req, res) => {
 
     const slug = realmSlug(realm);
     console.log(`[Character lookup] Searching for ${characterName} on ${slug}`);
-    const profile = await fetchCharacterProfile(slug, characterName);
+    let profile = await fetchCharacterProfile(slug, characterName);
+
+    // Alt-coded-name fallback: if the direct slug returned nothing, check our
+    // cached federation roster for a folded-ASCII match. This lets users find
+    // characters like "Nornë" by typing "Norne".
     if (!profile) {
-      return res.status(404).json({ error: 'Character not found on World of Warcraft Armory' });
+      const { matches } = await fuzzyMatchRoster(pool, characterName);
+      if (matches.length === 0) {
+        return res.status(404).json({ error: 'Character not found on World of Warcraft Armory' });
+      }
+      if (matches.length > 1) {
+        console.log(`[Character lookup] Fuzzy fallback: ${matches.length} candidates for "${characterName}" — returning picker`);
+        return res.json({
+          candidates: matches.map((m) => ({
+            characterName: m.character_name,
+            realm: m.realm_name || m.realm_slug,
+            realmSlug: m.realm_slug,
+            class: m.class || null,
+            race: m.race || null,
+            level: m.level || null,
+            guildName: m.guild_name || null,
+            faction: m.faction || null,
+          })),
+        });
+      }
+      // Exactly one match — re-fetch the live profile with the exact name +
+      // realm from the roster so downstream syncs use canonical values.
+      const only = matches[0];
+      console.log(`[Character lookup] Fuzzy fallback resolved "${characterName}" → ${only.character_name} on ${only.realm_slug}`);
+      profile = await fetchCharacterProfile(only.realm_slug, only.character_name);
+      if (!profile) {
+        return res.status(404).json({ error: 'Character not found on World of Warcraft Armory' });
+      }
     }
 
     // Guild verification — accept any character whose guild NAME matches one
@@ -142,6 +200,64 @@ router.post('/lookup', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Character lookup error:', err);
     return res.status(500).json({ error: 'Failed to validate character' });
+  }
+});
+
+// GET /api/characters/roster-search?q=<term>
+// Browse-the-roster picker. Returns federation guild members whose name
+// matches the query, folded to ASCII so users who can't type alt codes
+// (Nornë, Þràll, Bjørn) can still find their character. Used by the
+// "Can't type your name?" link in the add-character overlay.
+router.get('/roster-search', requireAuth, async (req, res) => {
+  try {
+    const raw = String(req.query.q || '').trim();
+    if (raw.length < 2) {
+      return res.status(400).json({ error: 'Query must be at least 2 characters' });
+    }
+    const folded = foldAscii(raw);
+    if (!folded) return res.json({ results: [] });
+
+    // Pull the candidate set (banned excluded, claimed-by-someone-else flagged
+    // so the UI can grey them out). Filter + rank in JS — guild_members is
+    // bounded by total federation roster size (hundreds–low thousands).
+    const [rows] = await pool.execute(
+      `SELECT gm.character_name, gm.realm_slug, gm.realm_name,
+              gm.class, gm.race, gm.level, gm.linked_user_id,
+              g.name AS guild_name, g.faction
+       FROM guild_members gm
+       JOIN guilds g ON g.id = gm.guild_id
+       WHERE gm.is_banned = 0`
+    );
+
+    const ranked = [];
+    for (const r of rows) {
+      const foldedName = foldAscii(r.character_name);
+      let score = -1;
+      if (foldedName === folded) score = 0;                    // exact fold match
+      else if (foldedName.startsWith(folded)) score = 1;       // prefix
+      else if (foldedName.includes(folded)) score = 2;         // substring
+      if (score < 0) continue;
+      ranked.push({ row: r, score, name: foldedName });
+    }
+    ranked.sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
+
+    const myUserId = Number(req.user.id);
+    const results = ranked.slice(0, 50).map(({ row }) => ({
+      characterName: row.character_name,
+      realm: row.realm_name || row.realm_slug,
+      realmSlug: row.realm_slug,
+      class: row.class || null,
+      race: row.race || null,
+      level: row.level || null,
+      guildName: row.guild_name || null,
+      faction: row.faction || null,
+      claimedByOther: row.linked_user_id && Number(row.linked_user_id) !== myUserId,
+      claimedByMe: row.linked_user_id && Number(row.linked_user_id) === myUserId,
+    }));
+    return res.json({ results });
+  } catch (err) {
+    console.error('Roster search error:', err);
+    return res.status(500).json({ error: 'Failed to search roster' });
   }
 });
 

@@ -59,7 +59,15 @@ export default function Profile() {
   const [overlayStatusText, setOverlayStatusText] = useState('');
   const [overlaySearching, setOverlaySearching] = useState(false);
   const [overlaySaving, setOverlaySaving] = useState(false);
+  const [overlayCandidates, setOverlayCandidates] = useState([]);
   const [allowedRealms, setAllowedRealms] = useState([]);
+
+  // Roster picker (for alt-coded character names users can't type)
+  const [rosterPickerOpen, setRosterPickerOpen] = useState(false);
+  const [rosterQuery, setRosterQuery] = useState('');
+  const [rosterResults, setRosterResults] = useState([]);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState('');
   // Companion-token / audit tool moved to Admin → Guild → Audit Tool.
 
   useEffect(() => {
@@ -83,6 +91,7 @@ export default function Profile() {
 
   const clearOverlayValidation = useCallback(() => {
     setOverlayValidatedCharacter(null);
+    setOverlayCandidates([]);
   }, []);
 
   const loadProfile = useCallback(async () => {
@@ -138,6 +147,7 @@ export default function Profile() {
     setOverlayRealm('');
     setOverlayIsMain(false);
     setOverlayValidatedCharacter(null);
+    setOverlayCandidates([]);
     setOverlayStatus('', '');
   };
 
@@ -171,9 +181,9 @@ export default function Profile() {
     setOverlayStatus('', '');
   };
 
-  const searchOverlayCharacter = async () => {
-    const characterName = overlayName.trim();
-    const realm = overlayRealm.trim();
+  const searchOverlayCharacter = async (overrides = {}) => {
+    const characterName = (overrides.characterName ?? overlayName).trim();
+    const realm = (overrides.realm ?? overlayRealm).trim();
 
     if (!characterName || !realm) {
       setOverlayStatus('error', 'Character name and realm are required.');
@@ -183,6 +193,7 @@ export default function Profile() {
     setOverlaySearching(true);
     setOverlayStatus('', '');
     setOverlayValidatedCharacter(null);
+    setOverlayCandidates([]);
 
     try {
       const res = await apiFetch('/characters/lookup', {
@@ -193,6 +204,15 @@ export default function Profile() {
       const data = await res.json();
       if (!res.ok) {
         setOverlayStatus('error', data.error || 'Character validation failed.');
+        return;
+      }
+
+      // Alt-coded fallback: backend returned multiple federation members
+      // whose names fold to the same ASCII as the user's input. Show a
+      // picker so they can choose the right one.
+      if (Array.isArray(data.candidates) && data.candidates.length > 0) {
+        setOverlayCandidates(data.candidates);
+        setOverlayStatus('', 'Multiple characters match that name. Pick yours below.');
         return;
       }
 
@@ -210,6 +230,66 @@ export default function Profile() {
       setOverlaySearching(false);
     }
   };
+
+  // Pick a candidate (from the alt-code fuzzy fallback OR the roster
+  // browser): drop the exact name + realm into the form, then re-run lookup
+  // so we get the full live profile from the Blizzard armory.
+  const selectCharacterCandidate = (candidate) => {
+    if (!candidate) return;
+    setOverlayName(candidate.characterName);
+    setOverlayRealm(candidate.realm);
+    setOverlayCandidates([]);
+    setRosterPickerOpen(false);
+    searchOverlayCharacter({ characterName: candidate.characterName, realm: candidate.realm });
+  };
+
+  const openRosterPicker = () => {
+    setRosterPickerOpen(true);
+    setRosterQuery(overlayName);
+    setRosterResults([]);
+    setRosterError('');
+  };
+
+  const closeRosterPicker = () => {
+    setRosterPickerOpen(false);
+  };
+
+  // Debounced roster search — fires whenever the picker is open and the
+  // query has at least 2 chars. Hits /api/characters/roster-search which
+  // ASCII-folds both sides, so "Norne" finds "Nornë".
+  useEffect(() => {
+    if (!rosterPickerOpen) return undefined;
+    const q = rosterQuery.trim();
+    if (q.length < 2) {
+      setRosterResults([]);
+      setRosterError('');
+      return undefined;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setRosterLoading(true);
+      setRosterError('');
+      try {
+        const res = await apiFetch(`/characters/roster-search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setRosterError(data.error || 'Roster search failed.');
+          setRosterResults([]);
+        } else {
+          setRosterResults(Array.isArray(data.results) ? data.results : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setRosterError('Roster search failed.');
+          setRosterResults([]);
+        }
+      } finally {
+        if (!cancelled) setRosterLoading(false);
+      }
+    }, 200);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [rosterQuery, rosterPickerOpen, apiFetch]);
 
   const submitOverlayAddCharacter = async (event) => {
     event.preventDefault();
@@ -721,12 +801,50 @@ export default function Profile() {
                 <button
                   type="button"
                   className="btn btn--secondary btn--sm"
-                  onClick={searchOverlayCharacter}
+                  onClick={() => searchOverlayCharacter()}
                   disabled={overlaySearching}
                 >
                   {overlaySearching ? 'Searching...' : 'Search'}
                 </button>
               </div>
+
+              <p className={styles.overlayHint}>
+                Special characters in your name?{' '}
+                <button
+                  type="button"
+                  className={styles.overlayHintLink}
+                  onClick={openRosterPicker}
+                >
+                  Browse the guild roster
+                </button>
+                .
+              </p>
+
+              {overlayCandidates.length > 0 && (
+                <div className={styles.candidates}>
+                  <p className={styles.candidatesHead}>Did you mean one of these?</p>
+                  <ul className={styles.candidatesList}>
+                    {overlayCandidates.map((c) => (
+                      <li key={`${c.realmSlug}:${c.characterName}`}>
+                        <button
+                          type="button"
+                          className={styles.candidateRow}
+                          onClick={() => selectCharacterCandidate(c)}
+                        >
+                          <span className={styles.candidateName}>{c.characterName}</span>
+                          <span className={styles.candidateMeta}>
+                            {[c.realm, c.race, c.class, c.level ? `Lv ${c.level}` : null]
+                              .filter(Boolean).join(' · ')}
+                          </span>
+                          {c.guildName && (
+                            <span className={styles.candidateGuild}>&lt;{c.guildName}&gt;</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className={`${styles.field} ${styles.checkboxField}`}>
                 <input
@@ -787,6 +905,95 @@ export default function Profile() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {rosterPickerOpen && (
+        <div className={styles.overlay}>
+          <button
+            className={styles.overlayBackdrop}
+            onClick={closeRosterPicker}
+            aria-label="Close roster picker"
+            type="button"
+          />
+          <div className={styles.overlayDialog} role="dialog" aria-modal="true" aria-labelledby="roster-picker-title">
+            <button
+              type="button"
+              className={styles.overlayClose}
+              onClick={closeRosterPicker}
+              aria-label="Close"
+            >
+              x
+            </button>
+
+            <h3 id="roster-picker-title" className={styles.overlayTitle}>Browse Guild Roster</h3>
+            <p className={styles.overlaySubtitle}>
+              Type your character&apos;s name without worrying about special
+              characters &mdash; we&apos;ll match the closest names from our federation guild rosters.
+            </p>
+
+            <div className={styles.field}>
+              <label htmlFor="roster-picker-q">Search</label>
+              <input
+                id="roster-picker-q"
+                type="text"
+                value={rosterQuery}
+                onChange={(e) => setRosterQuery(e.target.value)}
+                placeholder="Start typing a character name..."
+                autoFocus
+              />
+            </div>
+
+            {rosterError && (
+              <p className={`${styles.status} ${styles.statusError}`}>{rosterError}</p>
+            )}
+
+            <div className={styles.rosterList}>
+              {rosterLoading && (
+                <p className={styles.rosterEmpty}>Searching...</p>
+              )}
+              {!rosterLoading && rosterQuery.trim().length < 2 && (
+                <p className={styles.rosterEmpty}>Type at least 2 characters to search.</p>
+              )}
+              {!rosterLoading && rosterQuery.trim().length >= 2 && rosterResults.length === 0 && !rosterError && (
+                <p className={styles.rosterEmpty}>No matching characters in our federation rosters.</p>
+              )}
+              {!rosterLoading && rosterResults.map((c) => {
+                const disabled = c.claimedByOther;
+                return (
+                  <button
+                    key={`${c.realmSlug}:${c.characterName}`}
+                    type="button"
+                    className={styles.candidateRow}
+                    onClick={() => !disabled && selectCharacterCandidate(c)}
+                    disabled={disabled}
+                    title={disabled ? 'Already claimed by another user' : ''}
+                  >
+                    <span className={styles.candidateName}>{c.characterName}</span>
+                    <span className={styles.candidateMeta}>
+                      {[c.realm, c.race, c.class, c.level ? `Lv ${c.level}` : null]
+                        .filter(Boolean).join(' · ')}
+                    </span>
+                    {c.guildName && (
+                      <span className={styles.candidateGuild}>&lt;{c.guildName}&gt;</span>
+                    )}
+                    {c.claimedByOther && (
+                      <span className={styles.candidateBadge}>claimed</span>
+                    )}
+                    {c.claimedByMe && (
+                      <span className={styles.candidateBadge}>yours</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className={styles.overlayActions}>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={closeRosterPicker}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

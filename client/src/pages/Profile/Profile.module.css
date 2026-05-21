@@ -784,6 +784,140 @@
   margin-top: var(--space-6);
 }
 
+/* Alt-coded-name fallback: helper link + candidates list + roster picker. */
+.overlayHint {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: calc(var(--space-4) * -1) 0 var(--space-5);
+}
+
+.overlayHintLink {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-gold-dark);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.overlayHintLink:hover,
+.overlayHintLink:focus {
+  color: var(--color-gold);
+  outline: none;
+}
+
+.candidates {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  background: rgba(26, 26, 26, 0.6);
+}
+
+.candidatesHead {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-3);
+}
+
+.candidatesList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.rosterList {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.rosterEmpty {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: var(--space-6);
+  margin: 0;
+}
+
+.candidateRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: 100%;
+  text-align: left;
+  background: var(--color-gray-800);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  color: var(--color-text-primary);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.candidateRow:hover:not(:disabled),
+.candidateRow:focus:not(:disabled) {
+  border-color: var(--color-gold-dark);
+  background: var(--color-gray-700);
+  outline: none;
+}
+
+.candidateRow:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.candidateName {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-base);
+  color: var(--color-text-heading);
+  grid-column: 1;
+}
+
+.candidateMeta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.candidateGuild {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.candidateBadge {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 6px;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
 .empty {
   border: 1px dashed var(--color-gray-700);
   border-radius: var(--border-radius-md);
