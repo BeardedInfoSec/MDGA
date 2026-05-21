@@ -140,6 +140,7 @@ async function filterRegisteredRealmNames(realmNames) {
 module.exports = {
   findGuild,
   findGuildByName,
+  ensureGuildRegistered,
   getGuilds,
   getPrimaryGuild,
   getRegisteredRealmSlugs,

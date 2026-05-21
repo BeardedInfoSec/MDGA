@@ -83,8 +83,11 @@ async function refreshCharacter(char, options = {}) {
   }
 
   if (profile) {
-    // Re-resolve guild_id every refresh — picks up guild changes / realm transfers.
-    const matchedGuild = await guildRegistry.findGuild({
+    // Re-resolve guild_id every refresh — picks up guild changes / realm
+    // transfers. Uses ensureGuildRegistered so a federation guild on a
+    // realm we haven't seen before (e.g. MDGA-moon-guard for Alanazalzin)
+    // gets auto-registered instead of being treated as a foreign guild.
+    const matchedGuild = await guildRegistry.ensureGuildRegistered({
       guildName: profile.guild_name,
       realmSlug: profile.realm_slug || char.realm_slug,
     });

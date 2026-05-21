@@ -21,10 +21,16 @@ async function processCharacter(char) {
     return { action: 'error', name: char.character_name };
   }
 
-  // If profile came back but the (guild_name, realm_slug) doesn't match any
-  // registered child guild in the federation, remove the character.
+  // Federation membership check. Use ensureGuildRegistered so the
+  // (guild_name, character's realm) tuple is auto-registered when the
+  // guild's NAME matches a federation guild we know about but we don't
+  // yet have a row on that specific realm. Without this, a member like
+  // Alanazalzin (MDGA on moon-guard, while we'd only registered MDGA on
+  // illidan/tichondrius/etc.) gets deleted every cycle and has to keep
+  // re-adding their character. The from-roster ADD path already uses
+  // name-only matching — this aligns the scheduler with that semantic.
   const matchedGuild = profile
-    ? await guildRegistry.findGuild({
+    ? await guildRegistry.ensureGuildRegistered({
         guildName: profile.guild_name,
         realmSlug: profile.realm_slug || char.realm_slug,
       })
