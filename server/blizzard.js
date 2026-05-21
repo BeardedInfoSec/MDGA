@@ -120,6 +120,75 @@ async function scrapeArmoryProfile(realmSlug, characterName) {
   }
 }
 
+// Scrape the achievement-category breakdown from the web armory's
+// /achievements sub-page. The Game Data API exposes the raw achievement
+// list but no rolled-up category totals; the web page renders them as the
+// donut chart the user sees. Each category gives us:
+//   { count, total, points, totalPoints, name, slug, url }
+// Called for every character (not just scrape-fallback ones) so the card
+// can show "1985 Quest pts" etc. — a richer alternative to the
+// /statistics-derived lifetime counters that 404 for some characters.
+//
+// Returns array of category objects, or null on any failure (Blizzard
+// "Oops" page, parse error, network). Null leaves the previous breakdown
+// in place — no destructive overwrite.
+async function scrapeAchievementCategories(realmSlug, characterName) {
+  try {
+    const url = `https://worldofwarcraft.blizzard.com/en-us/character/us/${realmSlug}/${encodeURIComponent(characterName)}/achievements`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // Blizzard's web returns 200 with an "Oops! Something went wrong." page
+    // during transient backend outages. Detect + bail so we don't store junk.
+    if (/Oops!\s*<\/h1>|Something went wrong/i.test(html)) return null;
+
+    const marker = 'var characterProfileInitialState = ';
+    const start = html.indexOf(marker);
+    if (start < 0) return null;
+    const jsonStr = _extractBraceObject(html, start + marker.length);
+    if (!jsonStr) return null;
+
+    let data;
+    try { data = JSON.parse(jsonStr); }
+    catch { return null; }
+
+    // Find the categories array by walking the state object. The exact
+    // path is `data.character.achievements.index.categories` at time of
+    // writing, but Blizzard has shuffled this before — walk to find any
+    // array whose elements match the category shape.
+    let found = null;
+    const stack = [data];
+    while (stack.length && !found) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') continue;
+      for (const k of Object.keys(node)) {
+        const v = node[k];
+        if (Array.isArray(v) && v.length > 0 && v[0] && typeof v[0] === 'object'
+            && 'count' in v[0] && 'name' in v[0] && 'totalPoints' in v[0]) {
+          found = v;
+          break;
+        }
+        if (v && typeof v === 'object') stack.push(v);
+      }
+    }
+    if (!found) return null;
+
+    return found.map((c) => ({
+      slug: c.slug || null,
+      name: c.name || null,
+      count: typeof c.count === 'number' ? c.count : null,
+      total: typeof c.total === 'number' ? c.total : null,
+      points: typeof c.points === 'number' ? c.points : null,
+      totalPoints: typeof c.totalPoints === 'number' ? c.totalPoints : null,
+    }));
+  } catch (err) {
+    console.warn('[scrapeAchievementCategories] Failed:', err.message);
+    return null;
+  }
+}
+
 // Last-resort portrait fallback for characters whose Game Data profile API
 // 404s (account anomalies — see Saraníty/Tichondrius). The Blizzard web
 // search page renders the avatar from a static `render.worldofwarcraft.com`
@@ -522,5 +591,5 @@ module.exports = {
   getAccessToken, fetchPvpStats, fetchCharacterProfile, fetchCharacterStats,
   fetchCharacterTalents, fetchMythicKeystoneProfile, fetchRaidProgression,
   fetchGuildProfile, fetchGuildRoster, fetchGuildAchievements, fetchGuildActivity,
-  scrapeBlizzardRenderUrl, scrapeArmoryProfile,
+  scrapeBlizzardRenderUrl, scrapeArmoryProfile, scrapeAchievementCategories,
 };

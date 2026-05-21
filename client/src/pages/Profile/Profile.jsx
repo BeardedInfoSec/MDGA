@@ -766,6 +766,27 @@ export default function Profile() {
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Quests</span><span className={styles.charStatValue}>{formatNumber(char.quests_completed)}</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Achievement Pts</span><span className={styles.charStatValue}>{formatNumber(char.achievement_points)}</span></div>
                             </div>
+                            {Array.isArray(char.achievement_breakdown) && char.achievement_breakdown.length > 0 && (
+                              <>
+                                <div className={styles.charSectionLabel}>Achievement Breakdown</div>
+                                <div className={styles.charStatsGrid}>
+                                  {char.achievement_breakdown
+                                    .filter((cat) => (cat.points || 0) > 0)
+                                    .sort((a, b) => (b.points || 0) - (a.points || 0))
+                                    .map((cat) => {
+                                      const pct = cat.total > 0
+                                        ? Math.round((cat.count / cat.total) * 100)
+                                        : null;
+                                      return (
+                                        <div key={cat.slug || cat.name} className={styles.charStat}>
+                                          <span className={styles.charStatLabel}>{cat.name}{pct !== null ? ` (${pct}%)` : ''}</span>
+                                          <span className={styles.charStatValue}>{formatNumber(cat.points)}</span>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              </>
+                            )}
                             <p className={styles.charUpdated}>Updated {timeAgo(char.fetched_at)}</p>
                           </>
                         ) : (

@@ -7,6 +7,7 @@ const {
   fetchMythicKeystoneProfile,
   fetchRaidProgression,
   scrapeArmoryProfile,
+  scrapeAchievementCategories,
 } = require('../blizzard');
 const guildRegistry = require('./guild-registry');
 
@@ -66,6 +67,7 @@ async function refreshCharacter(char, options = {}) {
   // and similar account anomalies), pull profile + pvp from the SSR'd
   // JSON state in the armory HTML. Drop-in shape; the DB writes below
   // don't need to know whether the data came from API or scrape.
+  let dataSource = profile ? 'api' : null;
   if (!profile) {
     const scraped = await resolveOrNull(
       () => scrapeArmoryProfile(char.realm_slug, char.character_name),
@@ -75,6 +77,7 @@ async function refreshCharacter(char, options = {}) {
     if (scraped) {
       profile = scraped.profile;
       pvp = pvp || scraped.pvpStats;
+      dataSource = 'scrape';
       console.log(`[Character sync] Armory scrape recovered ${char.character_name}-${char.realm_slug}: ilvl=${profile?.item_level}, spec=${profile?.spec}, 2v2=${pvp?.arena_2v2}, shuffle=${pvp?.solo_shuffle}`);
     }
   }
@@ -89,7 +92,8 @@ async function refreshCharacter(char, options = {}) {
       `UPDATE user_characters SET
         level = ?, race = ?, class = COALESCE(?, class), spec = COALESCE(?, spec),
         item_level = ?, media_url = ?, guild_name = COALESCE(?, guild_name),
-        faction = COALESCE(?, faction), guild_id = ?, last_login = ?
+        faction = COALESCE(?, faction), guild_id = ?, last_login = ?,
+        stats_source = ?
       WHERE id = ?`,
       [
         profile.level,
@@ -102,6 +106,7 @@ async function refreshCharacter(char, options = {}) {
         profile.faction,
         matchedGuild ? matchedGuild.id : null,
         profile.last_login,
+        dataSource,
         char.id,
       ]
     );
@@ -112,6 +117,28 @@ async function refreshCharacter(char, options = {}) {
     await pool.execute(
       'UPDATE user_characters SET talents_json = ?, talents_updated_at = NOW() WHERE id = ?',
       [JSON.stringify(talents), char.id]
+    );
+    updated = true;
+  }
+
+  // Achievement-category breakdown from the web armory's /achievements
+  // page — pulls Quests, Dungeons & Raids, PvP, Exploration etc. with
+  // per-category completion counts + points. Web is sometimes flapping
+  // ("Oops! Something went wrong"); when it is, the helper returns null
+  // and we leave the previous breakdown in place rather than blanking it.
+  const breakdown = await resolveOrNull(
+    () => scrapeAchievementCategories(char.realm_slug, char.character_name),
+    'achievement breakdown scrape',
+    char
+  );
+  if (breakdown && breakdown.length > 0) {
+    await pool.execute(
+      `INSERT INTO pvp_stats (character_id, achievement_breakdown, fetched_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+         achievement_breakdown = VALUES(achievement_breakdown),
+         fetched_at = NOW()`,
+      [char.id, JSON.stringify(breakdown)]
     );
     updated = true;
   }
