@@ -2,7 +2,7 @@ const express = require('express');
 const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { sendApprovalEmail } = require('../services/email');
-const { sendApplicationAlert } = require('../bot');
+const { sendApplicationAlert, sendApplicationApprovedDM } = require('../bot');
 
 const router = express.Router();
 
@@ -67,21 +67,34 @@ router.put('/:id', requireAuth, requirePermission('admin.manage_applications'), 
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    // Send approval email if the application is linked to a user account
+    // On approve: activate the linked user account, email them, AND DM
+    // them via Discord with the #guild-invite-request instructions.
     let emailSent = false;
+    let dmResult = null;
     if (status === 'approved') {
-      const [apps] = await pool.execute('SELECT user_id FROM applications WHERE id = ?', [req.params.id]);
-      if (apps[0]?.user_id) {
-        const [users] = await pool.execute('SELECT email, display_name, username FROM users WHERE id = ?', [apps[0].user_id]);
-        if (users[0]?.email) {
-          // Also activate the user account
-          await pool.execute('UPDATE users SET status = ? WHERE id = ? AND status != ?', ['active', apps[0].user_id, 'active']);
-          emailSent = await sendApprovalEmail(users[0].email, users[0].display_name || users[0].username);
+      const [apps] = await pool.execute('SELECT user_id, discord_tag FROM applications WHERE id = ?', [req.params.id]);
+      const linkedUserId = apps[0]?.user_id;
+      let applicantDiscordId = null;
+      if (linkedUserId) {
+        const [users] = await pool.execute('SELECT email, display_name, username, discord_id FROM users WHERE id = ?', [linkedUserId]);
+        applicantDiscordId = users[0]?.discord_id || null;
+        if (users[0]) {
+          await pool.execute('UPDATE users SET status = ? WHERE id = ? AND status != ?', ['active', linkedUserId, 'active']);
+          if (users[0].email) {
+            emailSent = await sendApprovalEmail(users[0].email, users[0].display_name || users[0].username);
+          }
         }
       }
+      dmResult = await sendApplicationApprovedDM({
+        discordId: applicantDiscordId,
+        discordTag: apps[0]?.discord_tag || null,
+      }).catch((err) => {
+        console.error('Approval DM dispatch failed:', err);
+        return { status: 'dm_blocked' };
+      });
     }
 
-    res.json({ message: `Application ${status}`, emailSent });
+    res.json({ message: `Application ${status}`, emailSent, dmStatus: dmResult?.status || null });
   } catch (err) {
     console.error('Review application error:', err);
     res.status(500).json({ error: 'Failed to review application' });

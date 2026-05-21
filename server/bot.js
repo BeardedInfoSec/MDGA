@@ -10,6 +10,11 @@ const { sendApprovalEmail } = require('./services/email');
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const OFFICER_CHANNEL_ID = process.env.DISCORD_OFFICER_CHANNEL_ID;
+// #guild-invite-request channel — referenced in approval DMs so the
+// applicant knows exactly where to go for their in-game invite.
+// Falls back to a known channel id if the env var isn't set.
+const GUILD_INVITE_REQUEST_CHANNEL_ID =
+  process.env.DISCORD_GUILD_INVITE_REQUEST_CHANNEL_ID || '1376339634833068194';
 
 let client = null;
 
@@ -45,13 +50,90 @@ function startBot() {
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
-    const [action, userIdStr] = interaction.customId.split(':');
-    if (!['approve_user', 'reject_user', 'approve_unban', 'deny_unban'].includes(action)) return;
+    const [action, idStr] = interaction.customId.split(':');
+    if (!['approve_user', 'reject_user', 'approve_unban', 'deny_unban', 'approve_app', 'deny_app'].includes(action)) return;
 
-    const userId = parseInt(userIdStr);
+    const userId = parseInt(idStr);
     if (!userId) return;
 
     try {
+      if (action === 'approve_app' || action === 'deny_app') {
+        const appId = userId;  // shared local var name; idStr is the app id here
+        const newStatus = action === 'approve_app' ? 'approved' : 'denied';
+
+        // Officer permission check — the interactor must be a site user
+        // with admin.manage_applications (or be an officer in Discord).
+        // Cheap path: trust the officer channel gate (only officers can
+        // see/click these buttons because the channel is restricted),
+        // mirror what we do for approve_user / approve_unban.
+
+        const [rows] = await pool.execute(
+          'SELECT id, status, character_name, discord_tag, user_id FROM applications WHERE id = ?',
+          [appId]
+        );
+        const app = rows[0];
+        if (!app) {
+          await interaction.reply({ content: `Application #${appId} not found.`, ephemeral: true });
+          return;
+        }
+        if (app.status !== 'pending') {
+          await interaction.reply({ content: `Application #${appId} is already ${app.status}.`, ephemeral: true });
+          return;
+        }
+
+        // Look up the reviewing officer's site user_id by their Discord id
+        // so reviewed_by gets a meaningful FK. Falls back to NULL.
+        let reviewerUserId = null;
+        try {
+          const [reviewerRows] = await pool.execute(
+            'SELECT id FROM users WHERE discord_id = ? LIMIT 1',
+            [interaction.user.id]
+          );
+          reviewerUserId = reviewerRows[0]?.id || null;
+        } catch { /* non-fatal */ }
+
+        await pool.execute(
+          'UPDATE applications SET status = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?',
+          [newStatus, reviewerUserId, appId]
+        );
+
+        let dmStatus = '';
+        if (newStatus === 'approved') {
+          // Pull discord_id from the linked site user if present
+          let applicantDiscordId = null;
+          if (app.user_id) {
+            const [u] = await pool.execute('SELECT discord_id, email, display_name, username FROM users WHERE id = ?', [app.user_id]);
+            applicantDiscordId = u[0]?.discord_id || null;
+            // Activate the linked account + email them if we have one
+            if (u[0]) {
+              await pool.execute('UPDATE users SET status = ? WHERE id = ? AND status != ?', ['active', app.user_id, 'active']);
+              if (u[0].email) {
+                await sendApprovalEmail(u[0].email, u[0].display_name || u[0].username).catch(() => null);
+              }
+            }
+          }
+          const result = await sendApplicationApprovedDM({
+            discordId: applicantDiscordId,
+            discordTag: app.discord_tag,
+          });
+          dmStatus = ` (DM: ${result.status})`;
+        }
+
+        // Update the embed: tint by outcome, drop buttons, footer the reviewer
+        const baseEmbed = interaction.message.embeds[0];
+        const embed = baseEmbed
+          ? EmbedBuilder.from(baseEmbed)
+              .setColor(newStatus === 'approved' ? 0x34D399 : 0xEF4444)
+              .setFooter({ text: `${newStatus === 'approved' ? 'Approved' : 'Denied'} by ${interaction.user.tag}${dmStatus}` })
+          : new EmbedBuilder()
+              .setTitle(`Application ${newStatus}`)
+              .setColor(newStatus === 'approved' ? 0x34D399 : 0xEF4444);
+
+        await interaction.update({ embeds: [embed], components: [] });
+        console.log(`Application #${appId} (${app.character_name}) ${newStatus} by ${interaction.user.tag}${dmStatus}`);
+        return;
+      }
+
       if (action === 'approve_user') {
         await pool.execute(
           'UPDATE users SET status = ? WHERE id = ? AND status = ?',
@@ -337,6 +419,8 @@ async function sendApprovalRequest(user) {
 // Send a new-guild-application alert to the officer channel. Used by
 // POST /api/applications instead of the old DISCORD_WEBHOOK_URL path
 // (that env var sometimes goes unset, silently dropping notifications).
+// Includes Approve/Deny buttons so officers can review without leaving
+// Discord — handlers live in the interactionCreate listener below.
 async function sendApplicationAlert(app) {
   if (!client || !client.isReady() || !OFFICER_CHANNEL_ID) {
     console.warn('Cannot send application alert — bot not ready or no officer channel configured');
@@ -358,11 +442,111 @@ async function sendApplicationAlert(app) {
       )
       .setFooter({ text: `App #${app.id} • Review at mdga.gg/admin` })
       .setTimestamp();
-    await channel.send({ embeds: [embed] });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`approve_app:${app.id}`)
+        .setLabel('Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`deny_app:${app.id}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger),
+    );
+    await channel.send({ embeds: [embed], components: [row] });
     return true;
   } catch (err) {
     console.error('sendApplicationAlert error:', err);
     return false;
+  }
+}
+
+// DM an approved applicant with next-step instructions. Called from both
+// the web Approve button (PUT /api/applications/:id) AND the Discord
+// approve_app button. Resolves a Discord ID from either the applicant's
+// linked site account or by searching the guild for their discord_tag.
+// Returns one of: { status: 'sent' | 'already_in_server' | 'no_discord_id'
+// | 'dm_blocked' | 'bot_not_ready' }.
+async function sendApplicationApprovedDM(opts) {
+  const { discordId, discordTag } = opts || {};
+  if (!client || !client.isReady() || !GUILD_ID) {
+    return { status: 'bot_not_ready' };
+  }
+  // Resolve discordId if only a tag was provided
+  let resolvedId = discordId || null;
+  if (!resolvedId && discordTag) {
+    try {
+      const guild = client.guilds.cache.get(GUILD_ID);
+      if (guild) {
+        const members = await guild.members.fetch({ query: discordTag, limit: 5 }).catch(() => null);
+        const match = members?.find((m) =>
+          m.user?.username?.toLowerCase() === discordTag.toLowerCase()
+          || m.user?.tag?.toLowerCase() === discordTag.toLowerCase()
+        );
+        if (match) resolvedId = match.user.id;
+      }
+    } catch (err) {
+      console.warn('[App approval DM] guild lookup failed:', err.message);
+    }
+  }
+  if (!resolvedId) return { status: 'no_discord_id' };
+
+  const guild = client.guilds.cache.get(GUILD_ID);
+  const existingMember = guild ? await guild.members.fetch(resolvedId).catch(() => null) : null;
+  const channelMention = `<#${GUILD_INVITE_REQUEST_CHANNEL_ID}>`;
+
+  // Two paths: already in the server (deep-link to the channel),
+  // or not yet (one-time invite + name the channel they need).
+  let intro;
+  if (existingMember) {
+    intro = `You're already in our Discord — head to ${channelMention} for your in-game invite.`;
+  } else {
+    let inviteUrl = null;
+    if (guild) {
+      const inviteChannel = guild.channels.cache.get(GUILD_INVITE_REQUEST_CHANNEL_ID)
+        || guild.systemChannel
+        || guild.channels.cache.find((c) => c.type === 0 && c.permissionsFor(guild.members.me)?.has('CreateInstantInvite'));
+      if (inviteChannel) {
+        try {
+          const invite = await inviteChannel.createInvite({ maxAge: 86400 * 7, maxUses: 1, unique: true });
+          inviteUrl = invite.url;
+        } catch (err) {
+          console.warn('[App approval DM] invite creation failed:', err.message);
+        }
+      }
+    }
+    intro = inviteUrl
+      ? `Join our Discord: ${inviteUrl}\nOnce you're in, head to **#guild-invite-request** for your in-game invite.`
+      : `Join our Discord and head to **#guild-invite-request** for your in-game invite.`;
+  }
+
+  const body = [
+    `Your **MDGA** guild application has been approved. Welcome aboard.`,
+    ``,
+    intro,
+    ``,
+    `**How to get your in-game invite:**`,
+    ``,
+    `The easiest way is to apply through GuildFinder in-game. All our guilds (including MEGA) can be found by searching for **MDGA**. Sending an invite when you're offline doesn't always work, so applying yourself through GuildFinder is more reliable.`,
+    ``,
+    `The guild description in GuildFinder will tell you which one it is:`,
+    `• **MDGA1** — Main Guild (Mains and 1 very active alt only)`,
+    `• **MDGA2** — Mains and less-played / other alts`,
+    `• **MDGA3** — Mains and less-played / other alts`,
+    `• **MEGA** — Main and alts (Alliance side)`,
+    ``,
+    `If you run into any issues, ask in **#guild-invite-request** and an officer will sort it.`,
+  ].join('\n');
+
+  try {
+    const dmUser = await client.users.fetch(resolvedId);
+    if (!dmUser) return { status: 'no_discord_id' };
+    await dmUser.send(body);
+    return { status: existingMember ? 'sent' : 'sent', alreadyInServer: !!existingMember };
+  } catch (err) {
+    // 50007 = "Cannot send messages to this user" (DMs closed)
+    if (err.code === 50007) return { status: 'dm_blocked' };
+    console.error('sendApplicationApprovedDM error:', err);
+    return { status: 'dm_blocked' };
   }
 }
 
@@ -607,4 +791,4 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
   }
 }
 
-module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendApplicationAlert, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
+module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendApplicationAlert, sendApplicationApprovedDM, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
