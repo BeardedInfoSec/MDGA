@@ -514,9 +514,17 @@ async function sendApplicationApprovedDM(opts) {
   const balloonPath = findImage('MDGA_ballon.png');
   const finderPath = findImage('guild_finder.png', 'images');
 
+  // Personalize the welcome title with the applicant's Discord name.
+  // Prefer their account-wide display name (globalName) if set, falling
+  // back to their handle, then the form-supplied discord_tag, then a
+  // generic salutation.
+  const dmUserForTitle = await client.users.fetch(resolvedId).catch(() => null);
+  const displayName = dmUserForTitle?.globalName || dmUserForTitle?.username || discordTag || null;
+  const welcomeTitle = displayName ? `Welcome to MDGA ${displayName}!` : 'Welcome to MDGA!';
+
   // First embed: welcome + Discord invite + channel pointer
   const welcome = new EmbedBuilder()
-    .setTitle('Welcome to MDGA!')
+    .setTitle(welcomeTitle)
     .setColor(0xD4A017)
     .setDescription([
       `🎉 **Your MDGA guild application has been approved!** Welcome aboard.`,
