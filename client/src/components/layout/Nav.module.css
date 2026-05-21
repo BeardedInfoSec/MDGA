@@ -25,6 +25,12 @@
   max-width: var(--container-max);
   margin: 0 auto;
   padding: 0 var(--space-6);
+  /* Explicit minimum spacing between the logo and the nav links group.
+     `justify-content: space-between` distributes extra space at wide
+     viewports; this gap kicks in when the right-side content widens
+     (e.g. NotificationBell + user menu added) and the natural gap
+     would otherwise collapse to ~0. */
+  gap: var(--space-10);
 }
 
 .logo {

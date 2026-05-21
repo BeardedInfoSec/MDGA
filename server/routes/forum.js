@@ -481,13 +481,17 @@ router.post('/posts', requireAuth, async (req, res) => {
 
     // Fire @mention notifications for any users tagged in the post body.
     // Fire-and-forget so a notification-system blip can't kill post creation.
+    const postSlug = String(cleanTitle || '')
+      .toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-')
+      .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+    const postLinkSegment = postSlug ? `${newPostId}-${postSlug}` : `${newPostId}`;
     notifyMentions({
       text: cleanContent,
       actorId: req.user.id,
       sourceType: 'post',
       sourceId: newPostId,
       title: `${req.user.username} mentioned you in "${cleanTitle.slice(0, 80)}"`,
-      linkUrl: `/forum/post/${newPostId}`,
+      linkUrl: `/forum/post/${postLinkSegment}`,
     }).catch((err) => console.error('[notifications] post mentions failed:', err));
 
     res.status(201).json({ id: newPostId, message: 'Post created' });
@@ -797,7 +801,15 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
           );
           const COMMENTS_PER_PAGE = 25;
           const page = Math.max(1, Math.ceil((posRow?.total || 1) / COMMENTS_PER_PAGE));
-          const linkUrl = `/forum/post/${postId}?comments_page=${page}#comment-${newCommentId}`;
+          // Friendly URL slug mirrors the giveaway-kickoff Discord link
+          // pattern — `/forum/post/<id>-<title-slug>` so the URL itself
+          // hints at the post. ForumPost extracts the numeric id and
+          // ignores the rest, so old plain-id links keep working.
+          const slug = String(postRow.title || '')
+            .toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-')
+            .replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+          const postSegment = slug ? `${postId}-${slug}` : `${postId}`;
+          const linkUrl = `/forum/post/${postSegment}?comments_page=${page}#comment-${newCommentId}`;
 
           const mentioned = await notifyMentions({
             text: content,
