@@ -9,6 +9,8 @@ const pool = require('../db');
 const { requireAuth, requireOfficer } = require('../middleware/auth');
 const { syncDiscordMembers } = require('../services/discord-member-sync');
 const { syncAllGuilds } = require('../services/guild-sync');
+const { setMemberNickname, setMemberRoles } = require('../bot');
+const { logAdminAction } = require('../services/audit-log');
 
 const router = express.Router();
 
@@ -203,6 +205,202 @@ router.delete('/guild-members/:id/ignore', requireAuth, requireOfficer, async (r
   } catch (err) {
     console.error('[Reconciliation] ignore-clear error:', err);
     res.status(500).json({ error: 'Failed to clear ignore' });
+  }
+});
+
+// ── GET /api/reconciliation/snapshot ──
+// Officer toolkit's single round-trip endpoint. Returns all 8 cards in
+// one payload, plus header metadata (counts, last sync times). Replaces
+// 4-8 parallel calls from the toolkit on every refresh. Each `rows`
+// array is the same shape the underlying report endpoints return —
+// reuse those handlers' SQL by calling internal helpers where possible.
+router.get('/snapshot', requireAuth, requireOfficer, async (req, res) => {
+  try {
+    // Forward each report query in parallel via internal HTTP. Cleaner
+    // approach: factor the report queries into shared helpers; for v1
+    // we keep it simple by issuing internal fetches against the same
+    // process (no network hop — `http://127.0.0.1:<port>/api/...`).
+    const port = process.env.PORT || 3001;
+    const authHeader = req.headers.authorization || '';
+    const fetch = require('node-fetch');
+    const base = `http://127.0.0.1:${port}/api`;
+    const headers = { Authorization: authHeader };
+
+    const fetchJson = async (path) => {
+      try {
+        const r = await fetch(`${base}${path}`, { headers });
+        if (!r.ok) return { error: `${r.status}`, rows: [] };
+        return await r.json();
+      } catch (err) {
+        return { error: err.message, rows: [] };
+      }
+    };
+
+    const [
+      neverSignedIn,
+      noDiscordLink,
+      leftDiscord,
+      orphanDiscord,
+      altWithoutMain,
+      altNoteFormat,
+      nicknameMismatch,
+      spelling,
+      meta,
+    ] = await Promise.all([
+      fetchJson('/reports/guild-gaps?link_state=no_site_account&limit=500'),
+      fetchJson('/reports/guild-gaps?link_state=no_discord_link&limit=500'),
+      fetchJson('/reports/guild-gaps?link_state=discord_not_active&limit=500'),
+      fetchJson('/reports/discord-orphans?bucket=orphan_discord_member'),
+      fetchJson('/reports/guild-gaps?link_state=alt_without_main&limit=500'),
+      fetchJson('/reports/alt-note-format-violations'),
+      fetchJson('/reports/nickname-mismatches'),
+      fetchJson('/reports/spelling-mismatches'),
+      // Header metadata: counts + sync timestamps for the bar at the
+      // top of the toolkit.
+      (async () => {
+        const [[discordTotal]] = await pool.execute(
+          'SELECT COUNT(*) AS n FROM discord_members WHERE is_in_guild = 1'
+        );
+        const [[guildTotal]] = await pool.execute(
+          `SELECT COUNT(*) AS n FROM guild_members gm
+             JOIN guilds g ON g.id = gm.guild_id
+            WHERE g.is_primary = TRUE`
+        );
+        const [[lastDiscord]] = await pool.execute(
+          'SELECT MAX(last_synced_at) AS at FROM discord_members'
+        );
+        const [[lastGuild]] = await pool.execute(
+          `SELECT MAX(g.last_synced_at) AS at FROM guilds g WHERE g.is_primary = TRUE`
+        );
+        return {
+          discord_total: discordTotal.n,
+          guild_total: guildTotal.n,
+          last_discord_sync: lastDiscord.at,
+          last_guild_sync: lastGuild.at,
+        };
+      })(),
+    ]);
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      meta,
+      cards: {
+        never_signed_in:    { rows: neverSignedIn.rows || [] },
+        no_discord_link:    { rows: noDiscordLink.rows || [] },
+        left_discord:       { rows: leftDiscord.rows || [] },
+        orphan_in_discord:  { rows: orphanDiscord.rows || [] },
+        alt_without_main:   { rows: altWithoutMain.rows || [] },
+        alt_note_format:    { rows: altNoteFormat.rows || [] },
+        nickname_mismatch:  { rows: nicknameMismatch.rows || [] },
+        spelling_near:      { rows: spelling.rows || [] },
+      },
+    });
+  } catch (err) {
+    console.error('[Reconciliation] snapshot error:', err);
+    res.status(500).json({ error: 'Failed to build snapshot' });
+  }
+});
+
+// ── POST /api/reconciliation/action ──
+// Officer-toolkit single dispatcher for website-side actions (i.e. the
+// ones that don't require the in-game addon to execute). Body:
+//   { kind: 'rename_discord_nick' | 'remove_discord_role' |
+//           'link_guild_member' | 'ignore_guild_member' |
+//           'clear_ignore',
+//     target: { user_id?, member_id?, discord_id? },
+//     args: { nickname?, role_ids?, days? } }
+// In-game-only actions (kick, set officer note, promote, demote) come
+// from the toolkit's local SavedVariables queue path, not this endpoint.
+router.post('/action', requireAuth, requireOfficer, async (req, res) => {
+  try {
+    const { kind, target, args } = req.body || {};
+    if (!kind) return res.status(400).json({ error: 'Missing kind' });
+    const t = target || {};
+    const a = args || {};
+
+    switch (kind) {
+      case 'rename_discord_nick': {
+        if (!t.discord_id || !a.nickname) {
+          return res.status(400).json({ error: 'discord_id and nickname required' });
+        }
+        const result = await setMemberNickname(String(t.discord_id), String(a.nickname).slice(0, 32));
+        logAdminAction({
+          adminId: req.user.id, action: 'reconciliation.rename_discord_nick',
+          targetType: 'discord_member', targetId: null,
+          details: { discord_id: t.discord_id, nickname: a.nickname, result },
+        });
+        return res.json({ kind, result });
+      }
+
+      case 'remove_discord_role': {
+        if (!t.discord_id || !Array.isArray(a.role_ids) || a.role_ids.length === 0) {
+          return res.status(400).json({ error: 'discord_id and role_ids[] required' });
+        }
+        const result = await setMemberRoles(String(t.discord_id), [], a.role_ids.map(String));
+        logAdminAction({
+          adminId: req.user.id, action: 'reconciliation.remove_discord_role',
+          targetType: 'discord_member', targetId: null,
+          details: { discord_id: t.discord_id, removed_role_ids: a.role_ids, result },
+        });
+        return res.json({ kind, result });
+      }
+
+      case 'link_guild_member': {
+        const memberId = parseInt(t.member_id, 10);
+        const userId = parseInt(t.user_id, 10);
+        if (!Number.isFinite(memberId) || !Number.isFinite(userId)) {
+          return res.status(400).json({ error: 'member_id and user_id required' });
+        }
+        const [memberRows] = await pool.execute('SELECT id FROM guild_members WHERE id = ?', [memberId]);
+        if (memberRows.length === 0) return res.status(404).json({ error: 'Member not found' });
+        const [userRows] = await pool.execute('SELECT id FROM users WHERE id = ?', [userId]);
+        if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
+        await pool.execute('UPDATE guild_members SET linked_user_id = ? WHERE id = ?', [userId, memberId]);
+        logAdminAction({
+          adminId: req.user.id, action: 'reconciliation.link_guild_member',
+          targetType: 'guild_member', targetId: memberId,
+          details: { linked_user_id: userId },
+        });
+        return res.json({ kind, linked: true });
+      }
+
+      case 'ignore_guild_member': {
+        const memberId = parseInt(t.member_id, 10);
+        const days = Math.max(1, Math.min(365, parseInt(a.days, 10) || 30));
+        if (!Number.isFinite(memberId)) return res.status(400).json({ error: 'member_id required' });
+        await pool.execute(
+          'UPDATE guild_members SET reconciliation_ignored_until = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ?',
+          [days, memberId]
+        );
+        logAdminAction({
+          adminId: req.user.id, action: 'reconciliation.ignore_guild_member',
+          targetType: 'guild_member', targetId: memberId,
+          details: { days },
+        });
+        return res.json({ kind, ignored_for_days: days });
+      }
+
+      case 'clear_ignore': {
+        const memberId = parseInt(t.member_id, 10);
+        if (!Number.isFinite(memberId)) return res.status(400).json({ error: 'member_id required' });
+        await pool.execute(
+          'UPDATE guild_members SET reconciliation_ignored_until = NULL WHERE id = ?',
+          [memberId]
+        );
+        logAdminAction({
+          adminId: req.user.id, action: 'reconciliation.clear_ignore',
+          targetType: 'guild_member', targetId: memberId,
+          details: {},
+        });
+        return res.json({ kind, cleared: true });
+      }
+
+      default:
+        return res.status(400).json({ error: `Unknown action kind: ${kind}` });
+    }
+  } catch (err) {
+    console.error('[Reconciliation] action error:', err);
+    res.status(500).json({ error: 'Action failed', detail: err.message });
   }
 });
 

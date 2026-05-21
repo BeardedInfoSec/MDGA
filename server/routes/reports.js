@@ -1142,4 +1142,116 @@ router.get('/spelling-mismatches', requireAuth, requirePermission('admin.view_pa
   }
 });
 
+// ================================================
+// GET /api/reports/alt-note-format-violations
+// Officer-toolkit card 6: alts whose officer_note doesn't match the
+// canonical "MainName's Alt" format. Common drift: lowercase, missing
+// apostrophe, "alt of Name", etc. Returns the raw note + a suggested
+// canonical form (if the existing note parses as some-name + the word
+// "alt" in any order).
+// ================================================
+const CANONICAL_ALT_RE = /^[A-Z][\w'-]+'s Alt$/;
+router.get('/alt-note-format-violations', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const [guildRow] = await pool.execute('SELECT id FROM guilds WHERE is_primary = TRUE LIMIT 1');
+    if (guildRow.length === 0) return res.json({ rows: [] });
+    const guildId = guildRow[0].id;
+
+    // Only consider rows whose note looks alt-ish (contains 'alt' case-
+    // insensitively) but doesn't already match the canonical form. Filter
+    // the canonical match in JS so we can also recommend a fix.
+    const [rows] = await pool.execute(
+      `SELECT gm.id AS guild_member_id, gm.character_name, gm.realm_slug,
+              gm.guild_rank_name, gm.officer_note, gm.linked_user_id
+         FROM guild_members gm
+        WHERE gm.guild_id = ?
+          AND gm.officer_note IS NOT NULL
+          AND gm.officer_note <> ''
+          AND LOWER(gm.officer_note) LIKE '%alt%'
+          AND (gm.reconciliation_ignored_until IS NULL OR gm.reconciliation_ignored_until <= NOW())`,
+      [guildId]
+    );
+
+    const violations = [];
+    for (const r of rows) {
+      const note = String(r.officer_note || '').trim();
+      if (CANONICAL_ALT_RE.test(note)) continue;
+      // Try to recover the implied main name: take the first capitalized
+      // word that's followed by 's, OR the first capitalized word at all.
+      const apos = note.match(/([A-Za-z][\w-]+)['’]s?\s+alt/i);
+      const fallback = note.match(/([A-Za-z][\w-]+)/);
+      const rawName = (apos?.[1] || fallback?.[1] || '').trim();
+      const suggestedMain = rawName
+        ? rawName.charAt(0).toUpperCase() + rawName.slice(1).toLowerCase()
+        : null;
+      violations.push({
+        guild_member_id: r.guild_member_id,
+        character_name: r.character_name,
+        realm_slug: r.realm_slug,
+        guild_rank_name: r.guild_rank_name,
+        linked_user_id: r.linked_user_id,
+        current_note: note,
+        suggested_main: suggestedMain,
+        suggested_note: suggestedMain ? `${suggestedMain}'s Alt` : null,
+      });
+    }
+    res.json({ rows: violations });
+  } catch (err) {
+    console.error('[Reports] alt-note-format-violations error:', err);
+    res.status(500).json({ error: 'Failed to compute alt-note violations' });
+  }
+});
+
+// ================================================
+// GET /api/reports/nickname-mismatches
+// Officer-toolkit card 7: linked-user Discord nicknames (or global
+// display names) that don't match their declared main character.
+// Skips users with no main set; skips Discord owner; case-insensitive.
+// ================================================
+router.get('/nickname-mismatches', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT u.id AS user_id, u.username, u.display_name AS site_display_name,
+              u.discord_id, u.discord_username,
+              dm.nickname AS discord_nickname, dm.display_name AS discord_display_name,
+              uc.character_name AS main_character_name, uc.realm_slug AS main_realm_slug
+         FROM users u
+         JOIN user_characters uc
+           ON uc.user_id = u.id AND uc.is_main = TRUE
+         LEFT JOIN discord_members dm
+           ON dm.discord_id = u.discord_id AND dm.is_in_guild = 1
+        WHERE u.status = 'active'
+          AND u.discord_id IS NOT NULL
+          AND u.discord_id <> ''
+          AND dm.discord_id IS NOT NULL`
+    );
+    const mismatches = [];
+    for (const r of rows) {
+      const main = String(r.main_character_name || '').trim();
+      if (!main) continue;
+      // Use nickname if set (per-server), else display_name (global), else
+      // discord_username (handle). Anything that case-insensitively matches
+      // the main is considered fine.
+      const effective = String(r.discord_nickname || r.discord_display_name || r.discord_username || '').trim();
+      if (!effective) continue;
+      if (effective.toLowerCase() === main.toLowerCase()) continue;
+      mismatches.push({
+        user_id: r.user_id,
+        username: r.username,
+        discord_id: r.discord_id,
+        current_nickname: r.discord_nickname,
+        current_display_name: r.discord_display_name,
+        effective_name: effective,
+        main_character_name: r.main_character_name,
+        main_realm_slug: r.main_realm_slug,
+        suggested_nickname: r.main_character_name,
+      });
+    }
+    res.json({ rows: mismatches });
+  } catch (err) {
+    console.error('[Reports] nickname-mismatches error:', err);
+    res.status(500).json({ error: 'Failed to compute nickname mismatches' });
+  }
+});
+
 module.exports = router;

@@ -172,6 +172,145 @@ router.post('/logout', requireAuth, (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
+// ── Officer Toolkit token issuance ──
+// The MDGA Officer Toolkit (Tauri desktop app) authenticates by having
+// the officer sign into the website in their browser, click "Generate
+// toolkit code" on a small page, and paste the 8-char code into the
+// app. The app exchanges the code for a 7-day JWT.
+//
+// Codes live in this in-memory Map for ~5 minutes. Server restart
+// between issue+exchange voids the code (officer regenerates).
+const TOOLKIT_CODE_TTL_MS = 5 * 60 * 1000;
+const toolkitCodes = new Map(); // code -> { token, expiresAt, userId }
+function gcToolkitCodes() {
+  const now = Date.now();
+  for (const [code, entry] of toolkitCodes) {
+    if (entry.expiresAt <= now) toolkitCodes.delete(code);
+  }
+}
+function genToolkitCode() {
+  // 8 char [A-Z2-9] excluding O/0/I/1 for visual clarity
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+// POST /api/auth/toolkit-token-issue
+// Officer must be signed in (requireAuth) and have officer/guildmaster
+// rank OR admin.view_panel permission. Mints a 7-day toolkit JWT and a
+// one-time paste code; returns the code.
+router.post('/toolkit-token-issue', requireAuth, async (req, res) => {
+  try {
+    gcToolkitCodes();
+    const { loadUserPermissions } = require('../middleware/auth');
+    const permissions = await loadUserPermissions(req.user.id);
+    const isAdmin = permissions.includes('admin.view_panel');
+    const isOfficer = ['officer', 'guildmaster'].includes(req.user.rank);
+    if (!isOfficer && !isAdmin) {
+      return res.status(403).json({ error: 'Officer or admin access required' });
+    }
+    const jwt = require('jsonwebtoken');
+    const token = jwt.sign(
+      {
+        id: req.user.id,
+        username: req.user.username,
+        rank: req.user.rank,
+        permissions,
+        purpose: 'toolkit',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    // Generate a unique code (retry on collision; ~10^12 keyspace so very rare).
+    let code;
+    for (let i = 0; i < 5; i++) {
+      const candidate = genToolkitCode();
+      if (!toolkitCodes.has(candidate)) { code = candidate; break; }
+    }
+    if (!code) return res.status(500).json({ error: 'Could not allocate code' });
+    toolkitCodes.set(code, {
+      token,
+      expiresAt: Date.now() + TOOLKIT_CODE_TTL_MS,
+      userId: req.user.id,
+    });
+    res.json({
+      code,
+      expiresInSeconds: Math.floor(TOOLKIT_CODE_TTL_MS / 1000),
+      issuedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Toolkit token issue error:', err);
+    res.status(500).json({ error: 'Failed to issue toolkit code' });
+  }
+});
+
+// POST /api/auth/toolkit-token-exchange
+// Public — the toolkit POSTs the 8-char code it received from the
+// officer and receives the underlying 7-day JWT. One-time use; the
+// code is deleted on successful exchange.
+router.post('/toolkit-token-exchange', async (req, res) => {
+  try {
+    gcToolkitCodes();
+    const codeRaw = String(req.body?.code || '').trim().toUpperCase();
+    if (!/^[A-Z2-9]{8}$/.test(codeRaw)) {
+      return res.status(400).json({ error: 'Code must be 8 characters (A-Z, 2-9)' });
+    }
+    const entry = toolkitCodes.get(codeRaw);
+    if (!entry || entry.expiresAt <= Date.now()) {
+      return res.status(404).json({ error: 'Code not found or expired' });
+    }
+    toolkitCodes.delete(codeRaw);
+    res.json({
+      token: entry.token,
+      expiresInDays: 7,
+      issuedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Toolkit token exchange error:', err);
+    res.status(500).json({ error: 'Failed to exchange code' });
+  }
+});
+
+// POST /api/auth/toolkit-token-refresh
+// Toolkit calls this on launch when its current JWT is within ~24h of
+// expiry. Mints a fresh 7-day JWT and returns it. The caller must
+// already hold a valid toolkit JWT (purpose=toolkit).
+router.post('/toolkit-token-refresh', requireAuth, async (req, res) => {
+  try {
+    // requireAuth has already validated the existing JWT, but rebuilds
+    // req.user from the DB row — the `purpose` claim from the JWT
+    // doesn't propagate. Re-decode here to ensure this refresh path
+    // is only usable with a toolkit-minted token.
+    const jwt = require('jsonwebtoken');
+    const authHeader = req.headers.authorization || '';
+    const tok = authHeader.split(' ')[1];
+    const decoded = jwt.verify(tok, process.env.JWT_SECRET);
+    if (decoded.purpose !== 'toolkit') {
+      return res.status(403).json({ error: 'Not a toolkit token' });
+    }
+    const { loadUserPermissions } = require('../middleware/auth');
+    const permissions = await loadUserPermissions(req.user.id);
+    const token = jwt.sign(
+      {
+        id: req.user.id,
+        username: req.user.username,
+        rank: req.user.rank,
+        permissions,
+        purpose: 'toolkit',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ token, expiresInDays: 7, issuedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('Toolkit token refresh error:', err);
+    res.status(500).json({ error: 'Failed to refresh' });
+  }
+});
+
 // POST /api/auth/companion-token
 // Issues a long-lived JWT (90 days) for the MDGA Audit Tool / companion app to
 // hit officer-only endpoints. Restricted to Guildmaster rank or anyone with the
