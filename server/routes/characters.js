@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { fetchCharacterProfile } = require('../blizzard');
+const { fetchCharacterProfile, scrapeBlizzardRenderUrl } = require('../blizzard');
 const { refreshCharacter } = require('../services/character-sync');
 const { setMemberNickname } = require('../bot');
 const guildRegistry = require('../services/guild-registry');
@@ -345,13 +345,23 @@ router.post('/from-roster', requireAuth, async (req, res) => {
     }
 
     // Best-effort live enrichment from the retail profile endpoint. If it
-    // fails (Classic-only characters, etc.) we still save what the roster
-    // already gave us.
+    // fails (Blizzard-side data anomalies like the Saraníty/Tichondrius
+    // case) we still save what the roster already gave us, and try to
+    // recover at least the portrait by scraping Blizzard's public search
+    // page — the render endpoint is unauthenticated and accessible.
     let profile = null;
     try {
       profile = await fetchCharacterProfile(roster.realm_slug, roster.character_name);
     } catch (err) {
       console.warn('[Character from-roster] Profile enrichment failed:', err.message);
+    }
+
+    let scrapedRenderUrl = null;
+    if (!profile) {
+      scrapedRenderUrl = await scrapeBlizzardRenderUrl(roster.character_name, roster.realm_slug);
+      if (scrapedRenderUrl) {
+        console.log(`[Character from-roster] Recovered render via search-page scrape: ${scrapedRenderUrl}`);
+      }
     }
 
     const resolvedCharacterName = roster.character_name;
@@ -362,7 +372,7 @@ router.post('/from-roster', requireAuth, async (req, res) => {
     const resolvedLevel = profile?.level ?? roster.level ?? null;
     const resolvedRace = profile?.race || roster.race || null;
     const resolvedItemLevel = profile?.item_level ?? null;
-    const resolvedMediaUrl = profile?.media_url || null;
+    const resolvedMediaUrl = profile?.media_url || scrapedRenderUrl || null;
     const resolvedLastLogin = profile?.last_login || null;
     const resolvedGuildName = profile?.guild_name || roster.guild_name || null;
     const resolvedFaction = profile?.faction || roster.faction || null;

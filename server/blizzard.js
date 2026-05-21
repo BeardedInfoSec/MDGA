@@ -35,6 +35,43 @@ async function blizzFetch(url) {
   return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 }
 
+// Last-resort portrait fallback for characters whose Game Data profile API
+// 404s (account anomalies — see Saraníty/Tichondrius). The Blizzard web
+// search page renders the avatar from a static `render.worldofwarcraft.com`
+// URL we can extract. Returns the `-main-raw.png` URL if found, else null.
+// Brittle (HTML can change) — call only after the API path has failed.
+async function scrapeBlizzardRenderUrl(characterName, realmSlug) {
+  try {
+    const q = encodeURIComponent(characterName);
+    const res = await fetch(`https://worldofwarcraft.blizzard.com/en-us/search?q=${q}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Search returns matches across realms — narrow to the right realm slug
+    // by anchoring the regex on the realm path segment.
+    const realm = String(realmSlug || '').toLowerCase();
+    const pattern = new RegExp(
+      `https://render\\.worldofwarcraft\\.com/(?:[a-z-]+)/character/${realm}/\\d+/\\d+-(?:main-raw\\.png|inset\\.jpg|avatar\\.jpg)`,
+      'gi'
+    );
+    const hits = [...new Set(html.match(pattern) || [])];
+    if (hits.length === 0) return null;
+    // Prefer main-raw.png (full render). Fall back to inset, then avatar.
+    return (
+      hits.find((u) => u.endsWith('-main-raw.png')) ||
+      hits.find((u) => u.endsWith('-inset.jpg')) ||
+      hits[0]
+    );
+  } catch (err) {
+    console.warn('[scrapeBlizzardRenderUrl] Failed:', err.message);
+    return null;
+  }
+}
+
 async function fetchPvpStats(realmSlug, characterName) {
   const charSlug = characterName.toLowerCase();
   const url = `https://us.api.blizzard.com/profile/wow/character/${realmSlug}/${charSlug}/pvp-summary?namespace=profile-us&locale=en_US`;
@@ -400,4 +437,5 @@ module.exports = {
   getAccessToken, fetchPvpStats, fetchCharacterProfile, fetchCharacterStats,
   fetchCharacterTalents, fetchMythicKeystoneProfile, fetchRaidProgression,
   fetchGuildProfile, fetchGuildRoster, fetchGuildAchievements, fetchGuildActivity,
+  scrapeBlizzardRenderUrl,
 };
