@@ -6,6 +6,7 @@ const {
   fetchCharacterTalents,
   fetchMythicKeystoneProfile,
   fetchRaidProgression,
+  scrapeArmoryProfile,
 } = require('../blizzard');
 const guildRegistry = require('./guild-registry');
 
@@ -26,16 +27,18 @@ async function refreshCharacter(char, options = {}) {
   }
 
   const prefetchedProfile = options.profile || null;
+  const prefetchedPvp = options.pvpStats || null;
   let updated = false;
 
-  const [profile, pvp, achStats, talents, mplus, raidProg] = await Promise.all([
+  let [profile, pvp, achStats, talents, mplus, raidProg] = await Promise.all([
     prefetchedProfile ||
       resolveOrNull(
         () => fetchCharacterProfile(char.realm_slug, char.character_name),
         'profile fetch',
         char
       ),
-    resolveOrNull(() => fetchPvpStats(char.realm_slug, char.character_name), 'pvp fetch', char),
+    prefetchedPvp ||
+      resolveOrNull(() => fetchPvpStats(char.realm_slug, char.character_name), 'pvp fetch', char),
     resolveOrNull(
       () => fetchCharacterStats(char.realm_slug, char.character_name),
       'character stats fetch',
@@ -57,6 +60,24 @@ async function refreshCharacter(char, options = {}) {
       char
     ),
   ]);
+
+  // Web-armory scrape fallback. When the Game Data profile API 404s but
+  // the character exists on Blizzard's web armory (Saraníty/Tichondrius
+  // and similar account anomalies), pull profile + pvp from the SSR'd
+  // JSON state in the armory HTML. Drop-in shape; the DB writes below
+  // don't need to know whether the data came from API or scrape.
+  if (!profile) {
+    const scraped = await resolveOrNull(
+      () => scrapeArmoryProfile(char.realm_slug, char.character_name),
+      'armory scrape fallback',
+      char
+    );
+    if (scraped) {
+      profile = scraped.profile;
+      pvp = pvp || scraped.pvpStats;
+      console.log(`[Character sync] Armory scrape recovered ${char.character_name}-${char.realm_slug}: ilvl=${profile?.item_level}, spec=${profile?.spec}, 2v2=${pvp?.arena_2v2}, shuffle=${pvp?.solo_shuffle}`);
+    }
+  }
 
   if (profile) {
     // Re-resolve guild_id every refresh — picks up guild changes / realm transfers.

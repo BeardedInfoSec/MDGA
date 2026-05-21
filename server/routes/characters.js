@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { fetchCharacterProfile, scrapeBlizzardRenderUrl } = require('../blizzard');
+const { fetchCharacterProfile, scrapeArmoryProfile } = require('../blizzard');
 const { refreshCharacter } = require('../services/character-sync');
 const { setMemberNickname } = require('../bot');
 const guildRegistry = require('../services/guild-registry');
@@ -346,9 +346,10 @@ router.post('/from-roster', requireAuth, async (req, res) => {
 
     // Best-effort live enrichment from the retail profile endpoint. If it
     // fails (Blizzard-side data anomalies like the Saraníty/Tichondrius
-    // case) we still save what the roster already gave us, and try to
-    // recover at least the portrait by scraping Blizzard's public search
-    // page — the render endpoint is unauthenticated and accessible.
+    // case where the player exists in Blizzard's CMS but isn't exposed
+    // via the documented Game Data API), fall back to scraping the SSR'd
+    // web armory page — that gets us item level, spec, PvP ratings, full
+    // render, and achievement points from one HTML fetch.
     let profile = null;
     try {
       profile = await fetchCharacterProfile(roster.realm_slug, roster.character_name);
@@ -356,11 +357,13 @@ router.post('/from-roster', requireAuth, async (req, res) => {
       console.warn('[Character from-roster] Profile enrichment failed:', err.message);
     }
 
-    let scrapedRenderUrl = null;
+    let scrapedPvp = null;
     if (!profile) {
-      scrapedRenderUrl = await scrapeBlizzardRenderUrl(roster.character_name, roster.realm_slug);
-      if (scrapedRenderUrl) {
-        console.log(`[Character from-roster] Recovered render via search-page scrape: ${scrapedRenderUrl}`);
+      const scraped = await scrapeArmoryProfile(roster.realm_slug, roster.character_name);
+      if (scraped) {
+        profile = scraped.profile;
+        scrapedPvp = scraped.pvpStats;
+        console.log(`[Character from-roster] Armory scrape recovered: ilvl=${profile.item_level}, spec=${profile.spec}, render=${!!profile.media_url}`);
       }
     }
 
@@ -372,7 +375,7 @@ router.post('/from-roster', requireAuth, async (req, res) => {
     const resolvedLevel = profile?.level ?? roster.level ?? null;
     const resolvedRace = profile?.race || roster.race || null;
     const resolvedItemLevel = profile?.item_level ?? null;
-    const resolvedMediaUrl = profile?.media_url || scrapedRenderUrl || null;
+    const resolvedMediaUrl = profile?.media_url || null;
     const resolvedLastLogin = profile?.last_login || null;
     const resolvedGuildName = profile?.guild_name || roster.guild_name || null;
     const resolvedFaction = profile?.faction || roster.faction || null;
@@ -417,14 +420,17 @@ router.post('/from-roster', requireAuth, async (req, res) => {
       conn.release();
     }
 
-    // Best-effort full sync (talents, pvp stats, mythic+) only if Blizzard
-    // had the profile to begin with. For Classic-only characters we skip.
+    // Best-effort full sync. Pass through whatever we already have
+    // (Blizzard API profile, or scraped armory profile + pvp) so
+    // refreshCharacter doesn't re-fetch the same data. Other endpoints
+    // (talents, m+, raid progression, character stats) will still 404 for
+    // scrape-source characters, but pvp + profile data persists.
     let sync = { updated: false, profileSynced: false, talentsSynced: false, statsSynced: false };
     if (profile) {
       try {
         sync = await refreshCharacter(
           { id: insertedCharacterId, realm_slug: resolvedRealmSlug, character_name: resolvedCharacterName },
-          { profile }
+          { profile, pvpStats: scrapedPvp || undefined }
         );
       } catch (syncErr) {
         console.error('Immediate from-roster sync failed:', syncErr);

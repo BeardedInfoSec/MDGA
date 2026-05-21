@@ -35,6 +35,91 @@ async function blizzFetch(url) {
   return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 }
 
+// Brace-match an object literal embedded in JS source.
+// Returns the substring including the outer braces, or null on failure.
+function _extractBraceObject(source, startIndex) {
+  if (source[startIndex] !== '{') return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = startIndex; i < source.length; i++) {
+    const c = source[i];
+    if (esc) { esc = false; continue; }
+    if (inStr) { if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return source.slice(startIndex, i + 1); }
+  }
+  return null;
+}
+
+// Last-resort full scrape of Blizzard's web armory page. The web profile
+// works for characters whose Game Data profile API 404s (see Saraníty —
+// her player exists in Blizzard's CMS but isn't exposed via the documented
+// API). The page is server-rendered and embeds the full character state in
+// a `var characterProfileInitialState = {...}` blob. We extract that JSON
+// and reshape it into the same fields fetchCharacterProfile / fetchPvpStats
+// return, so refreshCharacter() can use it as a drop-in fallback.
+//
+// Returns { profile, pvpStats } or null if extraction fails. Achievement-
+// statistics-based fields (killing blows, arenas played, etc.) aren't in
+// the armory state so characterStats stays null — fine for our card UI,
+// which mainly shows item level / spec / pvp / honor kills.
+//
+// Brittle by nature: if Blizzard renames the global, restructures the
+// shape, or removes server-rendering, this returns null and the character
+// stays at "no stat snapshot yet" instead of misreporting numbers.
+async function scrapeArmoryProfile(realmSlug, characterName) {
+  try {
+    const url = `https://worldofwarcraft.blizzard.com/en-us/character/us/${realmSlug}/${encodeURIComponent(characterName)}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    const marker = 'var characterProfileInitialState = ';
+    const start = html.indexOf(marker);
+    if (start < 0) return null;
+    const jsonStr = _extractBraceObject(html, start + marker.length);
+    if (!jsonStr) return null;
+
+    let data;
+    try { data = JSON.parse(jsonStr); }
+    catch { return null; }
+    const c = data?.character;
+    if (!c || !c.name) return null;
+
+    const profile = {
+      character_name: c.name,
+      realm_name: c.realm?.name || null,
+      realm_slug: c.realm?.slug || realmSlug,
+      level: c.level || null,
+      race: c.race?.name || null,
+      class: c.class?.name || null,
+      spec: c.spec?.name || null,
+      item_level: c.averageItemLevel || null,
+      media_url: c.renderRaw?.url || c.render?.foreground?.url || null,
+      last_login: null,
+      guild_name: c.guild?.name || null,
+      faction: c.faction?.name || null,
+      achievement_points: c.achievement || 0,
+    };
+
+    const r = c.pvp?.ratings || {};
+    const pvpStats = c.pvp ? {
+      arena_2v2: r['2v2']?.rating || 0,
+      arena_3v3: r['3v3']?.rating || 0,
+      solo_shuffle: r.shuffle?.rating || 0,
+      rbg_rating: r.battlegrounds?.rating || 0,
+      honorable_kills: c.pvp.honorableKills?.value || 0,
+    } : null;
+
+    return { profile, pvpStats };
+  } catch (err) {
+    console.warn('[scrapeArmoryProfile] Failed:', err.message);
+    return null;
+  }
+}
+
 // Last-resort portrait fallback for characters whose Game Data profile API
 // 404s (account anomalies — see Saraníty/Tichondrius). The Blizzard web
 // search page renders the avatar from a static `render.worldofwarcraft.com`
@@ -437,5 +522,5 @@ module.exports = {
   getAccessToken, fetchPvpStats, fetchCharacterProfile, fetchCharacterStats,
   fetchCharacterTalents, fetchMythicKeystoneProfile, fetchRaidProgression,
   fetchGuildProfile, fetchGuildRoster, fetchGuildAchievements, fetchGuildActivity,
-  scrapeBlizzardRenderUrl,
+  scrapeBlizzardRenderUrl, scrapeArmoryProfile,
 };
