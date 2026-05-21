@@ -261,6 +261,166 @@ router.get('/roster-search', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/characters/from-roster
+// Save a character the user picked out of the federation guild roster
+// (the "Browse the guild roster" picker). We skip Blizzard's profile API
+// entirely here because:
+//   1) We already have the row in guild_members (synced from Blizzard's
+//      guild roster endpoint), so the data is trustworthy.
+//   2) Some characters (notably Classic-tier players whose guild appears
+//      in the retail roster) 404 on the retail profile endpoint even
+//      though the roster lists them — that's the only path some members
+//      have to add their character at all.
+// Guard: the (characterName, realmSlug) MUST exist in guild_members and
+// MUST NOT be banned. The fetch-the-roster-then-call-this dance keeps the
+// federation gate in place.
+router.post('/from-roster', requireAuth, async (req, res) => {
+  try {
+    const characterName = String(req.body.characterName || '').trim();
+    const realmSlugInput = String(req.body.realmSlug || '').trim().toLowerCase();
+    const isMain = !!req.body.isMain;
+    if (!characterName || !realmSlugInput) {
+      return res.status(400).json({ error: 'characterName and realmSlug are required' });
+    }
+
+    const [rosterRows] = await pool.execute(
+      `SELECT gm.character_name, gm.realm_slug, gm.realm_name, gm.class, gm.race, gm.level,
+              gm.is_banned, g.id AS guild_id, g.name AS guild_name, g.faction
+       FROM guild_members gm
+       JOIN guilds g ON g.id = gm.guild_id
+       WHERE gm.character_name = ? AND gm.realm_slug = ?
+       LIMIT 1`,
+      [characterName, realmSlugInput]
+    );
+    if (rosterRows.length === 0) {
+      return res.status(404).json({ error: 'Character not in any federation guild roster.' });
+    }
+    const roster = rosterRows[0];
+    if (roster.is_banned) {
+      return res.status(403).json({ error: 'This character is banned from the federation.' });
+    }
+
+    // Dedup against this user's existing characters.
+    const [existing] = await pool.execute(
+      'SELECT id FROM user_characters WHERE user_id = ? AND LOWER(character_name) = LOWER(?) AND realm_slug = ?',
+      [req.user.id, roster.character_name, roster.realm_slug]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ error: 'This character is already on your profile.' });
+    }
+
+    // Dedup against other users (claim-by-other check).
+    const [claimedBy] = await pool.execute(
+      `SELECT u.discord_username, u.display_name, u.username
+       FROM user_characters uc
+       JOIN users u ON uc.user_id = u.id
+       WHERE LOWER(uc.character_name) = LOWER(?) AND uc.realm_slug = ? AND uc.user_id != ?`,
+      [roster.character_name, roster.realm_slug, req.user.id]
+    );
+    if (claimedBy.length > 0) {
+      const owner = claimedBy[0].discord_username || claimedBy[0].display_name || claimedBy[0].username;
+      return res.status(409).json({
+        error: `This character is already claimed by ${owner}. If this is your character, please open a support ticket in our Discord server to have it reassigned.`,
+        claimedBy: owner,
+      });
+    }
+
+    // Best-effort live enrichment from the retail profile endpoint. If it
+    // fails (Classic-only characters, etc.) we still save what the roster
+    // already gave us.
+    let profile = null;
+    try {
+      profile = await fetchCharacterProfile(roster.realm_slug, roster.character_name);
+    } catch (err) {
+      console.warn('[Character from-roster] Profile enrichment failed:', err.message);
+    }
+
+    const resolvedCharacterName = roster.character_name;
+    const resolvedRealm = profile?.realm_name || roster.realm_name || roster.realm_slug;
+    const resolvedRealmSlug = roster.realm_slug;
+    const resolvedClass = profile?.class || roster.class || null;
+    const resolvedSpec = profile?.spec || null;
+    const resolvedLevel = profile?.level ?? roster.level ?? null;
+    const resolvedRace = profile?.race || roster.race || null;
+    const resolvedItemLevel = profile?.item_level ?? null;
+    const resolvedMediaUrl = profile?.media_url || null;
+    const resolvedLastLogin = profile?.last_login || null;
+    const resolvedGuildName = profile?.guild_name || roster.guild_name || null;
+    const resolvedFaction = profile?.faction || roster.faction || null;
+
+    const conn = await pool.getConnection();
+    let insertedCharacterId = null;
+    try {
+      await conn.beginTransaction();
+      if (isMain) {
+        await conn.execute('UPDATE user_characters SET is_main = FALSE WHERE user_id = ?', [req.user.id]);
+      }
+      const [result] = await conn.execute(
+        `INSERT INTO user_characters
+          (user_id, character_name, realm, realm_slug, class, spec, level, race, item_level, media_url, guild_name, faction, guild_id, last_login, is_main)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          req.user.id, resolvedCharacterName, resolvedRealm, resolvedRealmSlug,
+          resolvedClass, resolvedSpec, resolvedLevel, resolvedRace, resolvedItemLevel,
+          resolvedMediaUrl, resolvedGuildName, resolvedFaction, roster.guild_id,
+          resolvedLastLogin, isMain ? true : false,
+        ]
+      );
+      insertedCharacterId = result.insertId;
+      if (isMain) {
+        await conn.execute('UPDATE users SET realm = ?, character_name = ? WHERE id = ?',
+          [resolvedRealm, resolvedCharacterName, req.user.id]);
+      }
+      await conn.commit();
+
+      if (isMain) {
+        const [userRow] = await pool.execute('SELECT discord_id FROM users WHERE id = ?', [req.user.id]);
+        if (userRow.length > 0 && userRow[0].discord_id) {
+          setMemberNickname(userRow[0].discord_id, resolvedCharacterName).catch((err) => {
+            console.warn('[Nickname sync] Failed after from-roster add:', err.message);
+          });
+        }
+      }
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+    // Best-effort full sync (talents, pvp stats, mythic+) only if Blizzard
+    // had the profile to begin with. For Classic-only characters we skip.
+    let sync = { updated: false, profileSynced: false, talentsSynced: false, statsSynced: false };
+    if (profile) {
+      try {
+        sync = await refreshCharacter(
+          { id: insertedCharacterId, realm_slug: resolvedRealmSlug, character_name: resolvedCharacterName },
+          { profile }
+        );
+      } catch (syncErr) {
+        console.error('Immediate from-roster sync failed:', syncErr);
+      }
+    }
+
+    console.log(`[Character from-roster] Saved ${resolvedCharacterName}-${resolvedRealmSlug} (id=${insertedCharacterId}), live=${!!profile}`);
+    return res.status(201).json({
+      id: insertedCharacterId,
+      message: 'Character added',
+      character: {
+        characterName: resolvedCharacterName, realm: resolvedRealm, realmSlug: resolvedRealmSlug,
+        class: resolvedClass, spec: resolvedSpec, level: resolvedLevel, race: resolvedRace,
+        itemLevel: resolvedItemLevel, mediaUrl: resolvedMediaUrl,
+        guildName: resolvedGuildName, faction: resolvedFaction, lastLogin: resolvedLastLogin,
+      },
+      sync,
+      profileEnriched: !!profile,
+    });
+  } catch (err) {
+    console.error('Add character from-roster error:', err);
+    return res.status(500).json({ error: 'Failed to add character' });
+  }
+});
+
 // GET /api/characters/:userId
 router.get('/:userId', requireAuth, async (req, res) => {
   try {

@@ -231,16 +231,49 @@ export default function Profile() {
     }
   };
 
-  // Pick a candidate (from the alt-code fuzzy fallback OR the roster
-  // browser): drop the exact name + realm into the form, then re-run lookup
-  // so we get the full live profile from the Blizzard armory.
-  const selectCharacterCandidate = (candidate) => {
+  // Pick a candidate from the roster browser or the alt-code fuzzy
+  // fallback. We already have the row cached in guild_members, so save
+  // directly via /characters/from-roster — that skips Blizzard's profile
+  // endpoint, which 404s for some Classic-tier members even though the
+  // roster API lists them. Falls back to the regular lookup flow if the
+  // candidate didn't come from the roster picker (no realmSlug present).
+  const selectCharacterCandidate = async (candidate) => {
     if (!candidate) return;
     setOverlayName(candidate.characterName);
     setOverlayRealm(candidate.realm);
     setOverlayCandidates([]);
     setRosterPickerOpen(false);
-    searchOverlayCharacter({ characterName: candidate.characterName, realm: candidate.realm });
+
+    if (!candidate.realmSlug) {
+      // Legacy path: alt-code fuzzy fallback row without an explicit slug.
+      searchOverlayCharacter({ characterName: candidate.characterName, realm: candidate.realm });
+      return;
+    }
+
+    setOverlaySaving(true);
+    setOverlayStatus('', '');
+    try {
+      const res = await apiFetch('/characters/from-roster', {
+        method: 'POST',
+        body: JSON.stringify({
+          characterName: candidate.characterName,
+          realmSlug: candidate.realmSlug,
+          isMain: overlayIsMain,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOverlayStatus('error', data.error || 'Failed to add character.');
+        return;
+      }
+      closeAddCharacterOverlay();
+      setFlippedCardId(null);
+      await loadProfile();
+    } catch {
+      setOverlayStatus('error', 'Failed to add character.');
+    } finally {
+      setOverlaySaving(false);
+    }
   };
 
   const openRosterPicker = () => {
