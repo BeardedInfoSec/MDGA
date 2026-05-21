@@ -766,6 +766,42 @@ export default function Profile() {
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Quests</span><span className={styles.charStatValue}>{formatNumber(char.quests_completed)}</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Achievement Pts</span><span className={styles.charStatValue}>{formatNumber(char.achievement_points)}</span></div>
                             </div>
+                            {char.stats_source === 'scrape' && (
+                              <details
+                                className={styles.charStatsNotice}
+                                onClick={(e) => e.stopPropagation()}
+                                data-no-flip="true"
+                              >
+                                <summary>
+                                  <strong>Some stats hidden by Blizzard privacy settings.</strong>{' '}
+                                  How to fix
+                                </summary>
+                                <p>
+                                  Blizzard&apos;s Game Data API doesn&apos;t return lifetime stats
+                                  (Killing Blows, Dungeons, Raids, Quests, Arena&nbsp;Record, BG&nbsp;Record)
+                                  for this character. The owner has &ldquo;Community Sites and Apps&rdquo;
+                                  disabled in their Battle.net privacy settings — we&apos;re pulling
+                                  everything we can from the public armory page instead.
+                                </p>
+                                <p><strong>To unlock the full stats</strong> (character owner only):</p>
+                                <ol>
+                                  <li>
+                                    Sign in at{' '}
+                                    <a
+                                      href="https://account.battle.net/privacy#communication-preferences"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      account.battle.net/privacy
+                                    </a>
+                                  </li>
+                                  <li>Under <em>Game Data And Profile Privacy</em>, enable <em>Community Sites and Apps</em></li>
+                                  <li>Wait a few minutes for the change to propagate</li>
+                                  <li>Come back here and click <em>Refresh Stats</em></li>
+                                </ol>
+                              </details>
+                            )}
                             {Array.isArray(char.achievement_breakdown) && char.achievement_breakdown.length > 0 && (
                               <>
                                 <div className={styles.charSectionLabel}>Achievement Breakdown</div>
