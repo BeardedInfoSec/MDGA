@@ -334,6 +334,38 @@ async function sendApprovalRequest(user) {
   }
 }
 
+// Send a new-guild-application alert to the officer channel. Used by
+// POST /api/applications instead of the old DISCORD_WEBHOOK_URL path
+// (that env var sometimes goes unset, silently dropping notifications).
+async function sendApplicationAlert(app) {
+  if (!client || !client.isReady() || !OFFICER_CHANNEL_ID) {
+    console.warn('Cannot send application alert — bot not ready or no officer channel configured');
+    return false;
+  }
+  try {
+    const channel = await client.channels.fetch(OFFICER_CHANNEL_ID);
+    if (!channel) return false;
+    const embed = new EmbedBuilder()
+      .setTitle('New Guild Application')
+      .setColor(0xB91C1C)
+      .addFields(
+        { name: 'Character Name', value: String(app.characterName || app.character_name || 'N/A'), inline: true },
+        { name: 'Server', value: String(app.server || 'N/A'), inline: true },
+        { name: 'Class & Spec', value: String(app.classSpec || app.class_spec || 'N/A'), inline: true },
+        { name: 'Discord', value: String(app.discord || app.discord_tag || 'N/A'), inline: true },
+        { name: 'PvP Experience', value: String(app.experience || 'Not provided').slice(0, 1024), inline: false },
+        { name: 'Why MDGA?', value: String(app.whyJoin || app.why_join || 'Not provided').slice(0, 1024), inline: false },
+      )
+      .setFooter({ text: `App #${app.id} • Review at mdga.gg/admin` })
+      .setTimestamp();
+    await channel.send({ embeds: [embed] });
+    return true;
+  } catch (err) {
+    console.error('sendApplicationAlert error:', err);
+    return false;
+  }
+}
+
 // Send a simple alert embed to the officer channel
 async function sendOfficerAlert(title, description, color = 0xB91C1C) {
   if (!client || !client.isReady() || !OFFICER_CHANNEL_ID) return;
@@ -575,4 +607,4 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
   }
 }
 
-module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
+module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendApplicationAlert, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };

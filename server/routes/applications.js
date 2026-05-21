@@ -1,8 +1,8 @@
 const express = require('express');
-const fetch = require('node-fetch');
 const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { sendApprovalEmail } = require('../services/email');
+const { sendApplicationAlert } = require('../bot');
 
 const router = express.Router();
 
@@ -20,31 +20,15 @@ router.post('/', async (req, res) => {
       [characterName, server, classSpec, discord, experience || '', whyJoin || '']
     );
 
-    // Forward to Discord webhook (fire and forget)
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-    if (webhookUrl && webhookUrl !== 'YOUR_WEBHOOK_URL_HERE') {
-      const payload = {
-        embeds: [{
-          title: 'New Guild Application',
-          color: 0xB91C1C,
-          fields: [
-            { name: 'Character Name', value: characterName, inline: true },
-            { name: 'Server', value: server, inline: true },
-            { name: 'Class & Spec', value: classSpec, inline: true },
-            { name: 'Discord', value: discord, inline: true },
-            { name: 'PvP Experience', value: experience || 'Not provided', inline: false },
-            { name: 'Why MDGA?', value: whyJoin || 'Not provided', inline: false },
-          ],
-          footer: { text: `App #${result.insertId} | MDGA Website` },
-          timestamp: new Date().toISOString(),
-        }],
-      };
-      fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(err => console.error('Discord webhook error:', err));
-    }
+    // Officer-channel notification via the Discord bot. Previously used
+    // DISCORD_WEBHOOK_URL but that env var was silently empty in prod,
+    // dropping every application notification on the floor. The bot path
+    // reuses the OFFICER_CHANNEL_ID that's already configured for
+    // approval/rank-change alerts. Fire-and-forget — failures log.
+    sendApplicationAlert({
+      id: result.insertId,
+      characterName, server, classSpec, discord, experience, whyJoin,
+    }).catch((err) => console.error('Application alert dispatch failed:', err));
 
     res.status(201).json({ message: 'Application submitted', id: result.insertId });
   } catch (err) {
