@@ -285,7 +285,16 @@ router.get('/categories/:id/posts', async (req, res) => {
     const allowedLimits = [10, 15, 20, 50];
     const limit = allowedLimits.includes(parseInt(req.query.limit)) ? parseInt(req.query.limit) : 20;
     const offset = (page - 1) * limit;
-    const sort = req.query.sort || 'hot'; // hot, new, top
+    // Accepted sorts:
+    //   active  — most-recent reply (post.updated_at or newest comment), pins first.
+    //             Default — what users expect from a "BB-style" forum (forum #53).
+    //   hot     — Reddit-style log(score) + age decay
+    //   new/newest — created_at DESC (alias both — the frontend has historically
+    //             sent 'newest' while the backend matched 'new', so the New tab
+    //             silently fell through to Hot. Accept both to be safe.)
+    //   top     — net_votes DESC
+    const sortParam = String(req.query.sort || 'active').toLowerCase();
+    const sort = (sortParam === 'newest') ? 'new' : sortParam;
     const viewer = await getOptionalActiveUser(req);
 
     // Accept either a numeric id or a name-derived slug. Slug normalization
@@ -312,9 +321,13 @@ router.get('/categories/:id/posts', async (req, res) => {
       orderClause = 'fp.pinned DESC, fp.created_at DESC';
     } else if (sort === 'top') {
       orderClause = 'fp.pinned DESC, net_votes DESC, fp.created_at DESC';
-    } else {
+    } else if (sort === 'hot') {
       // Hot: Reddit-style — log(score) + age_bonus
       orderClause = 'fp.pinned DESC, (LOG10(GREATEST(ABS(COALESCE(vote_sum.net_votes, 0)) + 1, 1)) + UNIX_TIMESTAMP(fp.created_at) / 45000) DESC';
+    } else {
+      // active (default) — most recent activity, post.updated_at or newest comment.
+      // Pins always float to the top first.
+      orderClause = 'fp.pinned DESC, last_activity_at DESC';
     }
 
     // last_activity = newest of post.updated_at and the most recent live
@@ -1450,6 +1463,56 @@ router.put('/posts/:id/lock', requireAuth, requirePermission('forum.lock_posts')
     res.json({ message: 'Lock toggled' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to toggle lock' });
+  }
+});
+
+// PUT /api/forum/posts/:id/move — officer action to relocate a thread
+// to another category (forum #54). Body: { categoryId }. Guarded by
+// rank (officer/guildmaster) so we don't need a new permission row.
+// The target category must exist and the mover must have access to it
+// — can't accidentally surface an officer-only thread to a public board.
+router.put('/posts/:id/move', requireAuth, async (req, res) => {
+  try {
+    const postId = parsePostId(req.params.id);
+    if (!postId) return res.status(404).json({ error: 'Post not found' });
+    if (!['officer', 'guildmaster'].includes(req.user.rank)) {
+      return res.status(403).json({ error: 'Officer-only action' });
+    }
+    const targetId = parseInt(req.body.categoryId, 10);
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return res.status(400).json({ error: 'categoryId is required' });
+    }
+    const [postRows] = await pool.execute(
+      'SELECT category_id FROM forum_posts WHERE id = ? AND deleted_at IS NULL',
+      [postId]
+    );
+    if (postRows.length === 0) return res.status(404).json({ error: 'Post not found' });
+    if (postRows[0].category_id === targetId) {
+      return res.json({ message: 'Already in that category', changed: false });
+    }
+    const [catRows] = await pool.execute(
+      'SELECT id, name, officer_only FROM forum_categories WHERE id = ?',
+      [targetId]
+    );
+    if (catRows.length === 0) return res.status(404).json({ error: 'Target category not found' });
+    if (catRows[0].officer_only && !hasOfficerCategoryAccess(req.user)) {
+      return res.status(403).json({ error: 'No access to target category' });
+    }
+    await pool.execute(
+      'UPDATE forum_posts SET category_id = ?, updated_at = NOW() WHERE id = ?',
+      [targetId, postId]
+    );
+    logAdminAction({
+      adminId: req.user.id,
+      action: 'forum.move_post',
+      targetType: 'forum_post',
+      targetId: postId,
+      details: { from: postRows[0].category_id, to: targetId, target_name: catRows[0].name },
+    });
+    res.json({ message: 'Post moved', changed: true, categoryId: targetId });
+  } catch (err) {
+    console.error('Move post error:', err);
+    res.status(500).json({ error: 'Failed to move post' });
   }
 });
 

@@ -281,6 +281,27 @@ export default function ForumPost() {
     catch { alert('Failed to toggle lock'); }
   }
 
+  async function handleMovePost() {
+    const choices = (allCategories || [])
+      .filter((c) => c.id !== post?.category_id)
+      .map((c, i) => `${i + 1}. ${c.name}${c.officer_only ? ' (officer-only)' : ''}`)
+      .join('\n');
+    if (!choices) { alert('No other categories to move to.'); return; }
+    const pickRaw = prompt(`Move "${post.title}" to which category?\n\n${choices}\n\nEnter the number:`);
+    const pick = parseInt(pickRaw, 10);
+    const target = (allCategories || []).filter((c) => c.id !== post?.category_id)[pick - 1];
+    if (!target) return;
+    try {
+      const res = await apiFetch(`/forum/posts/${id}/move`, {
+        method: 'PUT',
+        body: JSON.stringify({ categoryId: target.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to move post'); return; }
+      loadPost();
+    } catch { alert('Failed to move post'); }
+  }
+
   function startEditComment(c) {
     setEditingCommentId(c.id);
     setEditingCommentText(c.content || '');
@@ -757,6 +778,14 @@ export default function ForumPost() {
                     </button>
                     <button type="button" className="btn btn--secondary btn--sm" onClick={handleToggleLock}>
                       {post.locked ? 'Unlock' : 'Lock'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={handleMovePost}
+                      title="Move this post to another category"
+                    >
+                      Move
                     </button>
                     <button
                       type="button"

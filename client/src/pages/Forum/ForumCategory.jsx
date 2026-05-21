@@ -40,7 +40,7 @@ export default function ForumCategory() {
   const [posts, setPosts] = useState([]);
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sort, setSort] = useState(searchParams.get('sort') || 'hot');
+  const [sort, setSort] = useState(searchParams.get('sort') || 'active');
   const [perPage, setPerPage] = useState(getPerPage);
   const page = parseInt(searchParams.get('page')) || 1;
 
@@ -98,18 +98,22 @@ export default function ForumCategory() {
   const canPost = isLoggedIn && category &&
     (!category.officer_only || isOfficer()) &&
     (!category.officer_post_only || isOfficer());
+  // Sort keys are sent as ?sort=... — match the server's accepted values.
+  // 'active' bumps a topic to the top when someone replies (forum #53).
   const sortOptions = [
+    { key: 'active', label: 'Latest' },
     { key: 'hot', label: 'Hot' },
-    { key: 'newest', label: 'New' },
+    { key: 'new', label: 'New' },
     { key: 'top', label: 'Top' },
   ];
+  const sortLabel = sortOptions.find((o) => o.key === sort)?.label || 'Latest';
 
   // Title band stats per-category
   const stats = [
     { value: String(category?.post_count ?? posts.length), label: 'Posts' },
     { value: category?.officer_only ? 'Officer-only' : 'Public', label: 'Visibility' },
     { value: pagination?.total != null ? String(pagination.total) : '—', label: 'Total threads' },
-    { value: sort === 'hot' ? 'Hot' : sort === 'newest' ? 'New' : 'Top', label: 'Sorted by' },
+    { value: sortLabel, label: 'Sorted by' },
   ];
 
   const accent = category?.accent_color || null;

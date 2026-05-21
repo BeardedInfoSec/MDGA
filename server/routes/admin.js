@@ -48,8 +48,12 @@ router.get('/stats', requireAuth, requirePermission('admin.view_panel'), async (
         ORDER BY post_count DESC LIMIT 5`),
       pool.execute('SELECT COUNT(*) AS n FROM events'),
       pool.execute('SELECT COUNT(*) AS n FROM events WHERE starts_at >= NOW()'),
-      pool.execute("SELECT COUNT(*) AS n FROM event_rsvps WHERE status='going'"),
-      pool.execute("SELECT COUNT(*) AS n FROM event_rsvps WHERE status='maybe'"),
+      pool.execute(`SELECT COUNT(*) AS n FROM event_rsvps r
+                     JOIN events e ON e.id = r.event_id
+                     WHERE r.status='going' AND e.starts_at >= NOW()`),
+      pool.execute(`SELECT COUNT(*) AS n FROM event_rsvps r
+                     JOIN events e ON e.id = r.event_id
+                     WHERE r.status='maybe' AND e.starts_at >= NOW()`),
       pool.execute('SELECT COUNT(*) AS n FROM user_characters'),
       pool.execute('SELECT COUNT(DISTINCT user_id) AS n FROM user_characters'),
       pool.execute('SELECT COUNT(*) AS n FROM discord_members WHERE is_in_guild = 1'),
