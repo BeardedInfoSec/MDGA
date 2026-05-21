@@ -38,7 +38,15 @@ export default function MarkdownContent({ source, className }) {
 
   const html = useMemo(() => {
     if (!source) return '';
-    const raw = marked.parse(String(source));
+    // Pre-process @mentions into a styled span before markdown parsing.
+    // The MentionSuggest dropdown inserts plain `@Name ` tokens — render
+    // them as a gold, heading-font name (drop the @ per the design ask).
+    // DOMPurify allows <span class> so this survives sanitization.
+    const withMentions = String(source).replace(
+      /(^|[\s(])@(\w{1,30})\b/g,
+      (_, lead, name) => `${lead}<span class="mdga-mention">${name}</span>`
+    );
+    const raw = marked.parse(withMentions);
     return DOMPurify.sanitize(raw, PURIFY_CONFIG);
   }, [source]);
 

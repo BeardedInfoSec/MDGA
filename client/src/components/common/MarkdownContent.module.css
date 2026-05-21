@@ -167,3 +167,14 @@
   gap: var(--space-2);
   justify-content: flex-end;
 }
+
+/* @mention spans injected by MarkdownContent.jsx — the markdown source is
+   pre-processed to wrap `@Name` tokens in <span class="mdga-mention">.
+   Using :global so the class survives CSS-module local-name hashing
+   (DOMPurify keeps the raw class attribute as-is). */
+:global(.mdga-mention) {
+  color: var(--color-gold);
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}

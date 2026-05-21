@@ -5,6 +5,7 @@ const { DateTime } = require('luxon');
 const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
+const { broadcastNotification } = require('../services/notifications');
 
 const router = express.Router();
 const VALID_EVENT_CATEGORIES = new Set(['pvp', 'defense', 'social', 'raid']);
@@ -263,6 +264,20 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
         'INSERT INTO events (title, starts_at, ends_at, timezone, category, description, prize, created_by, publish_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [title, startsAtUtc, endsAtUtc, timezone, category, description || '', prizeValue, req.user.id, publishAtValue]
       );
+      // Broadcast new-event notification to active members (skipping the
+      // creator). Skip if the event is scheduled-publish-in-the-future —
+      // notif fires when the post becomes visible, not when it's drafted.
+      const isPublishedNow = !publishAtValue || new Date(publishAtValue) <= new Date();
+      if (isPublishedNow) {
+        broadcastNotification({
+          type: 'event',
+          actorId: req.user.id,
+          sourceType: 'event',
+          sourceId: result.insertId,
+          title: `${req.user.username} added a new event: ${String(title).slice(0, 100)}`,
+          linkUrl: '/events',
+        }).catch((err) => console.error('[notifications] event broadcast failed:', err));
+      }
       res.status(201).json({ id: result.insertId, message: 'Event created' });
     }
   } catch (err) {

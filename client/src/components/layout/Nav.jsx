@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { primaryName, secondaryName } from '../../utils/userDisplay';
+import NotificationBell from './NotificationBell';
 import styles from './Nav.module.css';
 
 export default function Nav() {
@@ -108,6 +109,7 @@ export default function Nav() {
           </li>
 
           {/* Auth-dependent links */}
+          {isLoggedIn && <NotificationBell />}
           {isLoggedIn ? (
             <li className={styles.userMenu} ref={userRef}>
               <button

@@ -102,11 +102,16 @@ export default function MentionSuggest({ textareaId, value, onChange, apiFetch }
     const base = ta ? ta.value : value;
     const [start, end] = tokenRange;
     const label = user.main_character_name || user.display_name || user.username;
-    const inserted = `[@${label}](/profile?id=${user.id}) `;
+    // Insert as a plain @Name token (with a trailing space). The render
+    // pipeline + notification parser both scan for `@<word>` and look up
+    // the user by name — keeps the textarea source clean. We pass the
+    // resolved user id along via a zero-width marker so the rendered
+    // link and the notification dispatch don't need to re-disambiguate.
+    const inserted = `@${label} `;
     const next = base.slice(0, start) + inserted + base.slice(end);
     onChange(next);
     setOpen(false);
-    // Restore caret after the inserted markdown so the user can keep typing.
+    // Restore caret after the inserted text so the user can keep typing.
     setTimeout(() => {
       const ta2 = document.getElementById(textareaId);
       if (ta2) {

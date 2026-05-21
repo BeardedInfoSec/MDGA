@@ -4,6 +4,7 @@ const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
 const { logAdminAction } = require('../services/audit-log');
 const { sendOfficerAlert, sendDiscordAnnouncement } = require('../bot');
+const { notifyMentions, createNotification, broadcastNotification } = require('../services/notifications');
 const { DateTime } = require('luxon');
 
 const router = express.Router();
@@ -477,6 +478,18 @@ router.post('/posts', requireAuth, async (req, res) => {
       const params = cleanUrls.flatMap((u, i) => [newPostId, u, i]);
       await pool.execute(`INSERT INTO forum_post_images (post_id, image_url, sort_order) VALUES ${values}`, params);
     }
+
+    // Fire @mention notifications for any users tagged in the post body.
+    // Fire-and-forget so a notification-system blip can't kill post creation.
+    notifyMentions({
+      text: cleanContent,
+      actorId: req.user.id,
+      sourceType: 'post',
+      sourceId: newPostId,
+      title: `${req.user.username} mentioned you in "${cleanTitle.slice(0, 80)}"`,
+      linkUrl: `/forum/post/${newPostId}`,
+    }).catch((err) => console.error('[notifications] post mentions failed:', err));
+
     res.status(201).json({ id: newPostId, message: 'Post created' });
   } catch (err) {
     console.error('Create post error:', err);
@@ -758,6 +771,50 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
         console.error('Giveaway winner check failed:', err)
       ));
     }
+
+    // Notifications (fire-and-forget): @mentions in the comment + a
+    // reply notification to the post author. Mentions are deduped vs
+    // the author so they don't get both a reply and a mention notif
+    // for the same comment.
+    setImmediate(() => {
+      (async () => {
+        try {
+          // Pull post title + author for the notification copy
+          const [[postRow]] = await pool.execute(
+            'SELECT user_id, title FROM forum_posts WHERE id = ?', [postId]
+          );
+          if (!postRow) return;
+          const postTitle = String(postRow.title || '').slice(0, 80);
+          const linkUrl = `/forum/post/${postId}`;
+
+          const mentioned = await notifyMentions({
+            text: content,
+            actorId: req.user.id,
+            sourceType: 'comment',
+            sourceId: newCommentId,
+            title: `${req.user.username} mentioned you in "${postTitle}"`,
+            linkUrl,
+          });
+
+          // Reply notification to the post author (unless they already
+          // got a mention notif for this comment, or they're the commenter).
+          if (postRow.user_id && Number(postRow.user_id) !== Number(req.user.id)
+              && !mentioned.includes(postRow.user_id)) {
+            await createNotification({
+              userId: postRow.user_id,
+              type: 'reply',
+              actorId: req.user.id,
+              sourceType: 'comment',
+              sourceId: newCommentId,
+              title: `${req.user.username} replied to "${postTitle}"`,
+              linkUrl,
+            });
+          }
+        } catch (err) {
+          console.error('[notifications] comment trigger failed:', err);
+        }
+      })();
+    });
 
     res.status(201).json({ id: newCommentId, message: 'Comment added' });
   } catch (err) {
@@ -1786,6 +1843,14 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
           if (sent) {
             await pool.execute('UPDATE giveaway_configs SET kickoff_announced_at = NOW() WHERE post_id = ?', [postId])
               .catch(() => {});
+            broadcastNotification({
+              type: 'giveaway_kickoff',
+              actorId: req.user.id,
+              sourceType: 'giveaway',
+              sourceId: postId,
+              title: `Giveaway started: ${String(postRow.title).slice(0, 100)}`,
+              linkUrl: postUrl.replace(/^https?:\/\/[^/]+/, ''),
+            }).catch((err) => console.error('[notifications] immediate giveaway broadcast failed:', err));
           }
         });
       }
@@ -1936,6 +2001,17 @@ async function processGiveawaySchedule() {
             'UPDATE giveaway_configs SET kickoff_announced_at = NOW() WHERE post_id = ?',
             [row.post_id]
           );
+          // In-app notification broadcast to active members (forum #-): when
+          // the Discord kickoff fires, fan out a notification so members
+          // who aren't on Discord at that moment still see the drop.
+          broadcastNotification({
+            type: 'giveaway_kickoff',
+            actorId: null,
+            sourceType: 'giveaway',
+            sourceId: row.post_id,
+            title: `Giveaway started: ${String(row.title).slice(0, 100)}`,
+            linkUrl: postUrl.replace(/^https?:\/\/[^/]+/, ''),
+          }).catch((err) => console.error('[notifications] giveaway broadcast failed:', err));
         }
       }
     }

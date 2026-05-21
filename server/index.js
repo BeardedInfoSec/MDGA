@@ -84,6 +84,7 @@ app.use('/api/auth/discord', require('./routes/discord'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/applications', require('./routes/applications'));
 app.use('/api/forum', require('./routes/forum'));
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/characters', require('./routes/characters'));
