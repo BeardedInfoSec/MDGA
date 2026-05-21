@@ -791,6 +791,7 @@ router.get('/guild-gaps', requireAuth, requirePermission('admin.view_panel'), as
           gm.level,
           gm.guild_rank,
           gm.guild_rank_name,
+          gm.officer_note,
           gm.last_synced_at,
           gm.linked_user_id,
           gm.linked_character_id,
@@ -1251,6 +1252,194 @@ router.get('/nickname-mismatches', requireAuth, requirePermission('admin.view_pa
   } catch (err) {
     console.error('[Reports] nickname-mismatches error:', err);
     res.status(500).json({ error: 'Failed to compute nickname mismatches' });
+  }
+});
+
+// ================================================
+// GET /api/reports/name-changes
+// Officer-toolkit card 9 (new): suspected WoW name changes detected by
+// pairing a 'left' event with a 'joined' event on the SAME realm + SAME
+// guild that happened within 90 seconds (one sync cycle). Heuristic
+// can't be 100% because we don't store Blizzard character IDs, but
+// rename-via-Blizzard always shows up as exactly this shape and almost
+// nothing else does within a 90-second window. Filters out renames
+// where the new name has already been linked to a different user
+// (definitely not the same person then).
+// ================================================
+router.get('/name-changes', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const sinceDays = Math.min(parseInt(req.query.since_days, 10) || 30, 365);
+    const [rows] = await pool.execute(
+      `SELECT
+          left_ev.character_name AS old_name,
+          join_ev.character_name AS new_name,
+          left_ev.realm_slug AS realm_slug,
+          left_ev.guild_id,
+          g.name AS guild_name,
+          join_ev.occurred_at AS detected_at,
+          gm_new.id AS guild_member_id,
+          gm_new.linked_user_id,
+          gm_new.guild_rank_name,
+          u.discord_id,
+          u.discord_username,
+          dm.nickname AS discord_nickname,
+          dm.display_name AS discord_display_name
+        FROM guild_membership_events left_ev
+        JOIN guild_membership_events join_ev
+          ON join_ev.guild_id = left_ev.guild_id
+         AND join_ev.realm_slug = left_ev.realm_slug
+         AND join_ev.event_type = 'joined'
+         AND left_ev.event_type = 'left'
+         AND join_ev.character_name <> left_ev.character_name
+         AND ABS(TIMESTAMPDIFF(SECOND, left_ev.occurred_at, join_ev.occurred_at)) < 90
+        JOIN guilds g ON g.id = left_ev.guild_id
+        LEFT JOIN guild_members gm_new
+          ON gm_new.guild_id = join_ev.guild_id
+         AND LOWER(gm_new.character_name) = LOWER(join_ev.character_name)
+         AND gm_new.realm_slug = join_ev.realm_slug
+        LEFT JOIN users u ON u.id = gm_new.linked_user_id
+        LEFT JOIN discord_members dm
+          ON dm.discord_id = u.discord_id AND dm.is_in_guild = 1
+        WHERE left_ev.event_type = 'left'
+          AND left_ev.occurred_at >= NOW() - INTERVAL ? DAY
+        ORDER BY join_ev.occurred_at DESC
+        LIMIT 200`,
+      [sinceDays]
+    );
+
+    // Surface the row only if the new character is still in the guild
+    // (gm_new exists) — a true rename leaves it there; a coincidental
+    // leave+join of two different chars often has the new one bounce too.
+    const changes = rows.filter((r) => r.guild_member_id).map((r) => {
+      // What's the current Discord display? If linked + we have the
+      // discord_member record, suggest a nick rename to the new name.
+      const effectiveDiscord = r.discord_nickname || r.discord_display_name || r.discord_username;
+      const needsDiscordRename = !!r.discord_id
+        && effectiveDiscord
+        && effectiveDiscord.toLowerCase() === r.old_name.toLowerCase();
+      return {
+        guild_member_id: r.guild_member_id,
+        old_name: r.old_name,
+        new_name: r.new_name,
+        character_name: r.new_name,
+        realm_slug: r.realm_slug,
+        guild_name: r.guild_name,
+        guild_rank_name: r.guild_rank_name,
+        detected_at: r.detected_at,
+        linked_user_id: r.linked_user_id,
+        discord_id: r.discord_id,
+        discord_username: r.discord_username,
+        effective_name: effectiveDiscord,
+        suggested_nickname: needsDiscordRename ? r.new_name : null,
+      };
+    });
+
+    res.json({ rows: changes });
+  } catch (err) {
+    console.error('[Reports] name-changes error:', err);
+    res.status(500).json({ error: 'Failed to compute name changes' });
+  }
+});
+
+// ================================================
+// GET /api/reports/discord-retention
+// Discord membership retention metrics. Uses the discord_members
+// table's joined_at + left_at columns (populated by the discord
+// member sync since migration-041). Forward-looking only — anyone
+// who left before that migration shipped has no leave timestamp.
+//
+// Notes on interpretation:
+//   * "left" counts only members whose left_at landed in the window;
+//     they may have since rejoined (left_at gets overwritten on rejoin).
+//   * "early_churn" is the only retention-quality metric here; the
+//     others are flow counts. Real cohort survival needs an append-only
+//     events table (TODO if officers want trend lines).
+// ================================================
+router.get('/discord-retention', requireAuth, requirePermission('admin.view_panel'), async (req, res) => {
+  try {
+    const windows = [7, 30, 90];
+    const joinedPromises = windows.map((d) =>
+      pool.execute(
+        `SELECT COUNT(*) AS n FROM discord_members
+         WHERE joined_at IS NOT NULL AND joined_at >= NOW() - INTERVAL ? DAY`,
+        [d]
+      ).then(([rows]) => [d, rows[0].n])
+    );
+    const leftPromises = windows.map((d) =>
+      pool.execute(
+        `SELECT COUNT(*) AS n FROM discord_members
+         WHERE left_at IS NOT NULL AND left_at >= NOW() - INTERVAL ? DAY`,
+        [d]
+      ).then(([rows]) => [d, rows[0].n])
+    );
+    const [
+      [[current]],
+      joined,
+      left,
+      [[earlyChurn30]],
+      [[earlyChurn90]],
+      [tenureRows],
+    ] = await Promise.all([
+      pool.execute('SELECT COUNT(*) AS n FROM discord_members WHERE is_in_guild = 1'),
+      Promise.all(joinedPromises),
+      Promise.all(leftPromises),
+      pool.execute(
+        `SELECT COUNT(*) AS n FROM discord_members
+         WHERE joined_at IS NOT NULL
+           AND left_at IS NOT NULL
+           AND TIMESTAMPDIFF(DAY, joined_at, left_at) <= 14
+           AND left_at >= NOW() - INTERVAL 30 DAY`
+      ),
+      pool.execute(
+        `SELECT COUNT(*) AS n FROM discord_members
+         WHERE joined_at IS NOT NULL
+           AND left_at IS NOT NULL
+           AND TIMESTAMPDIFF(DAY, joined_at, left_at) <= 14
+           AND left_at >= NOW() - INTERVAL 90 DAY`
+      ),
+      pool.execute(
+        `SELECT
+           CASE
+             WHEN tenure_days <  7   THEN '0-7d'
+             WHEN tenure_days <  30  THEN '7-30d'
+             WHEN tenure_days <  90  THEN '30-90d'
+             WHEN tenure_days <  365 THEN '90-365d'
+             ELSE '365d+'
+           END AS bucket,
+           COUNT(*) AS n
+         FROM (
+           SELECT TIMESTAMPDIFF(DAY,
+             COALESCE(joined_at, created_at),
+             NOW()
+           ) AS tenure_days
+           FROM discord_members
+           WHERE is_in_guild = 1
+         ) t
+         GROUP BY bucket
+         ORDER BY FIELD(bucket, '0-7d','7-30d','30-90d','90-365d','365d+')`
+      ),
+    ]);
+
+    const fromPairs = (pairs) => Object.fromEntries(pairs.map(([d, n]) => [`${d}d`, n]));
+    const joinedObj = fromPairs(joined);
+    const leftObj = fromPairs(left);
+    const net = Object.fromEntries(windows.map((d) => [`${d}d`, joinedObj[`${d}d`] - leftObj[`${d}d`]]));
+
+    res.json({
+      current_members: current.n,
+      joined: joinedObj,
+      left: leftObj,
+      net,
+      early_churn: {
+        within_14d_of_join_last_30d: earlyChurn30.n,
+        within_14d_of_join_last_90d: earlyChurn90.n,
+      },
+      tenure_distribution: tenureRows.map((r) => ({ bucket: r.bucket, count: r.n })),
+      caveats: 'left_at is overwritten on rejoin, so "left" counts may understate churn. Tenure uses joined_at when present, otherwise our first-sync timestamp.',
+    });
+  } catch (err) {
+    console.error('[Reports] discord-retention error:', err);
+    res.status(500).json({ error: 'Failed to compute retention metrics' });
   }
 });
 

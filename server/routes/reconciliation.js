@@ -245,6 +245,7 @@ router.get('/snapshot', requireAuth, requireOfficer, async (req, res) => {
       altNoteFormat,
       nicknameMismatch,
       spelling,
+      nameChanges,
       meta,
     ] = await Promise.all([
       fetchJson('/reports/guild-gaps?link_state=no_site_account&limit=500'),
@@ -255,6 +256,7 @@ router.get('/snapshot', requireAuth, requireOfficer, async (req, res) => {
       fetchJson('/reports/alt-note-format-violations'),
       fetchJson('/reports/nickname-mismatches'),
       fetchJson('/reports/spelling-mismatches'),
+      fetchJson('/reports/name-changes?since_days=30'),
       // Header metadata: counts + sync timestamps for the bar at the
       // top of the toolkit.
       (async () => {
@@ -293,6 +295,7 @@ router.get('/snapshot', requireAuth, requireOfficer, async (req, res) => {
         alt_note_format:    { rows: altNoteFormat.rows || [] },
         nickname_mismatch:  { rows: nicknameMismatch.rows || [] },
         spelling_near:      { rows: spelling.rows || [] },
+        name_changes:       { rows: nameChanges.rows || [] },
       },
     });
   } catch (err) {

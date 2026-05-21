@@ -161,6 +161,13 @@ router.get('/search', async (req, res) => {
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+        AND gm_main.id = (
+          SELECT gm2.id FROM guild_members gm2
+          JOIN guilds g2 ON g2.id = gm2.guild_id
+          WHERE gm2.linked_character_id = uc_main.id
+          ORDER BY g2.is_primary DESC, gm2.id ASC
+          LIMIT 1
+        )
       LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN forum_comments fc_match ON fc_match.post_id = fp.id AND fc_match.content LIKE ?
@@ -364,6 +371,13 @@ router.get('/categories/:id/posts', async (req, res) => {
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+        AND gm_main.id = (
+          SELECT gm2.id FROM guild_members gm2
+          JOIN guilds g2 ON g2.id = gm2.guild_id
+          WHERE gm2.linked_character_id = uc_main.id
+          ORDER BY g2.is_primary DESC, gm2.id ASC
+          LIMIT 1
+        )
       LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       LEFT JOIN (
         SELECT post_id,
@@ -533,6 +547,13 @@ router.get('/posts/:id', async (req, res) => {
       JOIN users u ON fp.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+        AND gm_main.id = (
+          SELECT gm2.id FROM guild_members gm2
+          JOIN guilds g2 ON g2.id = gm2.guild_id
+          WHERE gm2.linked_character_id = uc_main.id
+          ORDER BY g2.is_primary DESC, gm2.id ASC
+          LIMIT 1
+        )
       LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       JOIN forum_categories fc_cat ON fc_cat.id = fp.category_id
       LEFT JOIN (
@@ -622,6 +643,13 @@ router.get('/posts/:id', async (req, res) => {
       JOIN users u ON fc.user_id = u.id
       LEFT JOIN user_characters uc_main ON uc_main.user_id = u.id AND uc_main.is_main = TRUE
       LEFT JOIN guild_members gm_main ON gm_main.linked_character_id = uc_main.id
+        AND gm_main.id = (
+          SELECT gm2.id FROM guild_members gm2
+          JOIN guilds g2 ON g2.id = gm2.guild_id
+          WHERE gm2.linked_character_id = uc_main.id
+          ORDER BY g2.is_primary DESC, gm2.id ASC
+          LIMIT 1
+        )
       LEFT JOIN guilds g_main ON g_main.id = gm_main.guild_id
       LEFT JOIN (
         SELECT comment_id,

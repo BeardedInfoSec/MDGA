@@ -1,13 +1,14 @@
 ## Interface: 120001
 ## Title: MDGA Guild Tracker
-## Notes: Guild roster tracking, event logging, calendar with website event import & alerts, bank monitor, stats dashboard, mass whisper, promote/demote, attendance, auto-messages, and website sync. Officer-only.
+## Notes: Guild roster tracking, event logging, calendar with website event import & alerts, bank monitor, stats dashboard, mass whisper, promote/demote, attendance, auto-messages, website sync, and Officer Toolkit queue consumer. Officer-only.
 ## Author: Make Durotar Great Again
-## Version: 1.5.1
-## SavedVariables: MDGA_Data
+## Version: 1.6.0
+## SavedVariables: MDGA_Data, MDGA_Toolkit_Queue, MDGA_Toolkit_Results
 
 Core.lua
 MinimapButton.lua
 GuildActions.lua
+ToolkitQueue.lua
 CalendarTracker.lua
 GuildBank.lua
 AutoMessages.lua

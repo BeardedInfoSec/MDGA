@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshCw, Users, LogIn, MessageSquare, Calendar, Sword, Hash } from 'lucide-react';
+import { RefreshCw, Users, LogIn, MessageSquare, Calendar, Sword, Hash, TrendingDown } from 'lucide-react';
 import styles from './AdminStats.module.css';
 import { postUrlFromParts } from '../../../utils/forumUrls';
 import { fullDisplayName } from '../../../utils/userDisplay';
@@ -20,21 +20,30 @@ function fmt(n) {
   return Number(n).toLocaleString();
 }
 
+function fmtSigned(n) {
+  if (n == null) return '—';
+  const v = Number(n);
+  return (v > 0 ? '+' : '') + v.toLocaleString();
+}
+
 export default function AdminStats({ apiFetch, showToast }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [membership, setMembership] = useState(null);
+  const [retention, setRetention] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, memRes] = await Promise.all([
+      const [statsRes, memRes, retRes] = await Promise.all([
         apiFetch('/admin/stats'),
         apiFetch('/guild/membership-events?limit=15'),
+        apiFetch('/reports/discord-retention'),
       ]);
       if (statsRes.ok) setData(await statsRes.json());
       else showToast?.('Failed to load stats');
       if (memRes.ok) setMembership(await memRes.json());
+      if (retRes.ok) setRetention(await retRes.json());
     } catch {
       showToast?.('Failed to load stats');
     } finally {
@@ -108,6 +117,38 @@ export default function AdminStats({ apiFetch, showToast }) {
         </div>
       </div>
 
+      {retention && (
+        <div className={styles.tilesGroup}>
+          <h3 className={styles.groupTitle}>
+            <TrendingDown size={14} /> Discord retention
+          </h3>
+          <div className={styles.tiles}>
+            <Tile label="Joined (7d)" value={`+${fmt(retention.joined['7d'])}`} accent />
+            <Tile label="Left (7d)" value={`-${fmt(retention.left['7d'])}`} />
+            <Tile label="Net (7d)" value={fmtSigned(retention.net['7d'])} />
+            <Tile label="Joined (30d)" value={`+${fmt(retention.joined['30d'])}`} />
+            <Tile label="Left (30d)" value={`-${fmt(retention.left['30d'])}`} />
+            <Tile label="Net (30d)" value={fmtSigned(retention.net['30d'])} />
+            <Tile
+              label="Early churn (30d)"
+              value={fmt(retention.early_churn.within_14d_of_join_last_30d)}
+              hint="Left within 14d of joining"
+            />
+          </div>
+          {retention.tenure_distribution?.length > 0 && (
+            <div className={styles.tenureBar}>
+              {retention.tenure_distribution.map((b) => (
+                <div key={b.bucket} className={styles.tenureSlice} title={`${b.bucket}: ${fmt(b.count)} members`}>
+                  <span className={styles.tenureLabel}>{b.bucket}</span>
+                  <span className={styles.tenureCount}>{fmt(b.count)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className={styles.tenureCaveat}>{retention.caveats}</p>
+        </div>
+      )}
+
       {/* ── Top posters ── */}
       {data.forum.topPosters.length > 0 && (
         <div className={styles.tilesGroup}>
@@ -172,11 +213,12 @@ export default function AdminStats({ apiFetch, showToast }) {
   );
 }
 
-function Tile({ label, value, accent }) {
+function Tile({ label, value, accent, hint }) {
   return (
-    <div className={`${styles.tile} ${accent ? styles.tileAccent : ''}`}>
+    <div className={`${styles.tile} ${accent ? styles.tileAccent : ''}`} title={hint || undefined}>
       <span className={styles.tileValue}>{value}</span>
       <span className={styles.tileLabel}>{label}</span>
+      {hint && <span className={styles.tileHint}>{hint}</span>}
     </div>
   );
 }
