@@ -2,7 +2,9 @@
 // DISCORD BOT — Guild verification, approval buttons, kick detection
 // Runs inside the Express process via startBot()
 // ================================================
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const path = require('path');
+const fs = require('fs');
 const pool = require('./db');
 const { syncUserRolesFromDiscord } = require('./services/discord-role-sync');
 const { sendApprovalEmail } = require('./services/email');
@@ -490,58 +492,70 @@ async function sendApplicationApprovedDM(opts) {
   }
   if (!resolvedId) return { status: 'no_discord_id' };
 
-  const guild = client.guilds.cache.get(GUILD_ID);
-  const existingMember = guild ? await guild.members.fetch(resolvedId).catch(() => null) : null;
-  const channelMention = `<#${GUILD_INVITE_REQUEST_CHANNEL_ID}>`;
+  // Always show the static permanent invite + name the channel. We
+  // intentionally don't branch on "already in the server" — this is a
+  // first-contact message; the applicant may have left, applied from a
+  // different account, or never been in the server. Either way, the
+  // friendly invite + channel name reads correctly.
+  const intro = `🔗 **Join our Discord:** https://discord.gg/wowmdga\nOnce you're in, head to **#guild-invite-request** for your in-game invite.`;
 
-  // Two paths: already in the server (deep-link to the channel),
-  // or not yet (one-time invite + name the channel they need).
-  let intro;
-  if (existingMember) {
-    intro = `You're already in our Discord — head to ${channelMention} for your in-game invite.`;
-  } else {
-    let inviteUrl = null;
-    if (guild) {
-      const inviteChannel = guild.channels.cache.get(GUILD_INVITE_REQUEST_CHANNEL_ID)
-        || guild.systemChannel
-        || guild.channels.cache.find((c) => c.type === 0 && c.permissionsFor(guild.members.me)?.has('CreateInstantInvite'));
-      if (inviteChannel) {
-        try {
-          const invite = await inviteChannel.createInvite({ maxAge: 86400 * 7, maxUses: 1, unique: true });
-          inviteUrl = invite.url;
-        } catch (err) {
-          console.warn('[App approval DM] invite creation failed:', err.message);
-        }
-      }
-    }
-    intro = inviteUrl
-      ? `Join our Discord: ${inviteUrl}\nOnce you're in, head to **#guild-invite-request** for your in-game invite.`
-      : `Join our Discord and head to **#guild-invite-request** for your in-game invite.`;
+  // Image paths — falls back to null if any image is missing on this
+  // host, in which case the embed renders without it. Tries dist first
+  // (deployed location) then public/source (dev/repo location).
+  function findImage(name, extraSubdir) {
+    const candidates = [
+      path.resolve(__dirname, '..', 'client', 'dist', name),
+      path.resolve(__dirname, '..', 'client', 'public', name),
+      path.resolve(__dirname, '..', name),
+    ];
+    if (extraSubdir) candidates.unshift(path.resolve(__dirname, '..', extraSubdir, name));
+    return candidates.find((p) => { try { return fs.existsSync(p); } catch { return false; } }) || null;
   }
+  const balloonPath = findImage('MDGA_ballon.png');
+  const finderPath = findImage('guild_finder.png', 'images');
 
-  const body = [
-    `Your **MDGA** guild application has been approved. Welcome aboard.`,
-    ``,
-    intro,
-    ``,
-    `**How to get your in-game invite:**`,
-    ``,
-    `The easiest way is to apply through GuildFinder in-game. All our guilds (including MEGA) can be found by searching for **MDGA**. Sending an invite when you're offline doesn't always work, so applying yourself through GuildFinder is more reliable.`,
-    ``,
-    `The guild description in GuildFinder will tell you which one it is:`,
-    `• **MDGA1** — Main Guild (Mains and 1 very active alt only)`,
-    `• **MDGA2** — Mains and less-played / other alts`,
-    `• **MDGA3** — Mains and less-played / other alts`,
-    `• **MEGA** — Main and alts (Alliance side)`,
-    ``,
-    `If you run into any issues, ask in **#guild-invite-request** and an officer will sort it.`,
-  ].join('\n');
+  // First embed: welcome + Discord invite + channel pointer
+  const welcome = new EmbedBuilder()
+    .setTitle('Welcome to MDGA!')
+    .setColor(0xD4A017)
+    .setDescription([
+      `🎉 **Your MDGA guild application has been approved!** Welcome aboard.`,
+      ``,
+      intro,
+    ].join('\n'))
+    .setTimestamp();
+  if (balloonPath) welcome.setImage('attachment://MDGA_ballon.png');
+
+  // Second embed: GuildFinder how-to with screenshot
+  const instructions = new EmbedBuilder()
+    .setTitle('How to get your in-game invite')
+    .setColor(0xD4A017)
+    .setDescription([
+      `⚔️ The easiest way is to apply through **GuildFinder** in-game. All our guilds (including MEGA) can be found by searching for **MDGA**. Sending an invite when you're offline doesn't always work, so applying yourself through GuildFinder is more reliable.`,
+      ``,
+      `📜 **The guild description in GuildFinder will tell you which one it is:**`,
+      `🔴 **MDGA1** — Main Guild (Mains and 1 very active alt only)`,
+      `🟠 **MDGA2** — Mains and less-played / other alts`,
+      `🟡 **MDGA3** — Mains and less-played / other alts`,
+      `🔵 **MEGA** — Main and alts (Alliance side)`,
+      ``,
+      `❓ If you run into any issues, ask in **#guild-invite-request** and an officer will sort it.`,
+    ].join('\n'));
+  if (finderPath) instructions.setImage('attachment://guild_finder.png');
+
+  const files = [];
+  if (balloonPath) files.push(new AttachmentBuilder(balloonPath, { name: 'MDGA_ballon.png' }));
+  if (finderPath) files.push(new AttachmentBuilder(finderPath, { name: 'guild_finder.png' }));
 
   try {
     const dmUser = await client.users.fetch(resolvedId);
     if (!dmUser) return { status: 'no_discord_id' };
-    await dmUser.send(body);
-    return { status: existingMember ? 'sent' : 'sent', alreadyInServer: !!existingMember };
+    await dmUser.send({ embeds: [welcome, instructions], files });
+    return {
+      status: 'sent',
+      balloonAttached: !!balloonPath,
+      finderAttached: !!finderPath,
+    };
   } catch (err) {
     // 50007 = "Cannot send messages to this user" (DMs closed)
     if (err.code === 50007) return { status: 'dm_blocked' };
