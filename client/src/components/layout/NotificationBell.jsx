@@ -105,7 +105,13 @@ export default function NotificationBell() {
     if (n.read_at == null) {
       // Mark read in DB (fire and forget — the navigation matters more)
       apiFetch(`/notifications/${n.id}/read`, { method: 'POST' }).catch(() => null);
+      // Optimistic UI: decrement the badge AND update this row's
+      // read_at so when the dropdown reopens it visually shows as
+      // read (no gold tint, no red dot) instead of waiting for the
+      // next fetchList to overwrite it.
+      const nowIso = new Date().toISOString();
       setUnread((u) => Math.max(0, u - 1));
+      setItems((arr) => arr.map((x) => x.id === n.id ? { ...x, read_at: nowIso } : x));
     }
     if (n.link_url) navigate(n.link_url);
   }
