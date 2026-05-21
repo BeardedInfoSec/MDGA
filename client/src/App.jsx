@@ -16,6 +16,7 @@ import ForumNewPost from './pages/Forum/ForumNewPost';
 import Leaderboards from './pages/Leaderboards/Leaderboards';
 import Profile from './pages/Profile/Profile';
 import Admin from './pages/Admin/Admin';
+import OfficerToolkitAuth from './pages/OfficerToolkit/OfficerToolkitAuth';
 
 export default function App() {
   return (
@@ -38,6 +39,11 @@ export default function App() {
         <Route path="/forum/new/:slug" element={<ProtectedRoute><ForumNewPost /></ProtectedRoute>} />
         <Route path="/leaderboards" element={<Leaderboards />} />
         <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+
+        {/* Officer Toolkit sign-in code generator (Tauri desktop app
+            auth handoff). Officer-only gate is enforced inside the
+            page itself + the server endpoint. */}
+        <Route path="/officer-toolkit/auth" element={<ProtectedRoute><OfficerToolkitAuth /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

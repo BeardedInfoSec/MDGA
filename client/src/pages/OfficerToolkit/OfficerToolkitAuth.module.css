@@ -1,0 +1,120 @@
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6);
+  font-family: var(--font-ui);
+}
+
+.header {
+  margin-bottom: var(--space-8);
+}
+
+.eyebrow {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-3xl, 2.25rem);
+  color: var(--color-gold);
+  letter-spacing: 1px;
+  margin: 0 0 var(--space-3);
+}
+
+.subtitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.subtitle strong { color: var(--color-text-primary); }
+
+.card {
+  padding: var(--space-8);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--space-8);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.codeBlock {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-black, #0a0a0a);
+  border: 2px solid var(--color-gold);
+  border-radius: var(--border-radius-md);
+}
+
+.codeText {
+  font-family: var(--font-mono, monospace);
+  font-size: 2rem;
+  letter-spacing: 0.4rem;
+  color: var(--color-gold);
+  font-weight: 700;
+  user-select: all;
+}
+
+.copyBtn { white-space: nowrap; }
+
+.expiry {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.expiry strong {
+  color: var(--color-gold);
+  font-family: var(--font-mono, monospace);
+}
+
+.error {
+  color: var(--color-red-light, #FCA5A5);
+  font-size: var(--font-size-sm);
+  margin: var(--space-3) 0 0;
+}
+
+.instructions {
+  padding: var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+}
+
+.instructionsTitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  color: var(--color-gold);
+  margin: 0 0 var(--space-4);
+}
+
+.steps {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
+.steps li { margin-bottom: var(--space-2); }
+.steps em { color: var(--color-gold); font-style: normal; font-weight: 600; }
+
+.fineprint {
+  margin-top: var(--space-5);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
