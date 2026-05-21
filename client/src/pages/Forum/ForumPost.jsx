@@ -212,6 +212,16 @@ export default function ForumPost() {
 
   useEffect(() => { loadPost(); }, [loadPost]);
 
+  // Keep commentsPage in sync with ?comments_page=N when the URL changes
+  // while we're already on the page (e.g. a notification deep-link clicked
+  // from the bell while viewing the same thread). Without this, the state
+  // initializer only runs once and we stay on whatever page was loaded.
+  useEffect(() => {
+    const p = parseInt(searchParams.get('comments_page'), 10);
+    const target = Number.isInteger(p) && p > 0 ? p : 1;
+    setCommentsPage((cur) => (cur === target ? cur : target));
+  }, [searchParams]);
+
   // Scroll to a specific comment when the URL hash is `#comment-NN`
   // (notification deep links use this format). Wait for the comments
   // array to actually contain the target before scrolling — otherwise
