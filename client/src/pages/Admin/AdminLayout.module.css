@@ -156,6 +156,14 @@
 }
 .navItemActive .navItemIcon { color: var(--color-gold); }
 
+/* External-link affordance on sidebar items that navigate OUT of the
+   admin shell (Officer Toolkit code generator, etc.). */
+.navItemExternal {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+
 .sidebarFooter {
   padding: 1rem 0.75rem;
   border-top: 1px solid var(--color-gray-800);

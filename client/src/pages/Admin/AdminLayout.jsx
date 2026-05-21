@@ -42,6 +42,7 @@ const NAV_GROUPS = [
       { id: 'guild', label: 'Roster + Federation' },
       { id: 'game-ranks', label: 'Game Rank Mappings' },
       { id: 'audit-tool', label: 'Audit Tool' },
+      { id: 'officer-toolkit-auth', label: 'Officer Toolkit Code', href: '/officer-toolkit/auth' },
     ],
   },
   {
@@ -148,17 +149,32 @@ export default function AdminLayout({
                 <ul className={styles.navItems}>
                   {visibleItems.map((item) => (
                     <li key={item.id}>
-                      <button
-                        type="button"
-                        className={`${styles.navItem} ${activeTab === item.id ? styles.navItemActive : ''}`}
-                        onClick={() => {
-                          onTabChange(item.id);
-                          setSidebarOpen(false);
-                        }}
-                      >
-                        {!showLabel && <GroupIcon size={16} className={styles.navItemIcon} />}
-                        <span>{item.label}</span>
-                      </button>
+                      {item.href ? (
+                        // External-to-Admin route (e.g. Officer Toolkit auth
+                        // page). Renders as a Link so it leaves the admin
+                        // shell instead of trying to switch tabs.
+                        <Link
+                          to={item.href}
+                          className={styles.navItem}
+                          onClick={() => setSidebarOpen(false)}
+                        >
+                          {!showLabel && <GroupIcon size={16} className={styles.navItemIcon} />}
+                          <span>{item.label}</span>
+                          <ExternalLink size={12} className={styles.navItemExternal} aria-hidden="true" />
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`${styles.navItem} ${activeTab === item.id ? styles.navItemActive : ''}`}
+                          onClick={() => {
+                            onTabChange(item.id);
+                            setSidebarOpen(false);
+                          }}
+                        >
+                          {!showLabel && <GroupIcon size={16} className={styles.navItemIcon} />}
+                          <span>{item.label}</span>
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
