@@ -198,6 +198,15 @@ export default function PeopleMembers({ apiFetch, showToast, currentUser, onMana
               Auto-synced
             </span>
           )}
+          {u.afk_until && String(u.afk_until).slice(0, 10) >= new Date().toISOString().slice(0, 10) && (
+            <span
+              className={styles.overrideBadge}
+              style={{ background: 'rgba(184, 134, 11, 0.15)', borderColor: 'var(--color-gold-dark)', color: 'var(--color-gold)' }}
+              title={`AFK until ${String(u.afk_until).slice(0, 10)}${u.afk_reason ? ` — ${u.afk_reason}` : ''}`}
+            >
+              <span>AFK until {String(u.afk_until).slice(0, 10)}</span>
+            </span>
+          )}
         </div>
 
         <div className={styles.rolesCell}>

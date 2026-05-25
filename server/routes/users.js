@@ -48,7 +48,8 @@ router.get('/', requireAuth, requirePermission('admin.manage_users'), async (req
       : `LIMIT ${parseInt(pageSize, 10)} OFFSET ${parseInt((page - 1) * pageSize, 10)}`;
 
     const [rows] = await pool.execute(
-      `SELECT id, username, email, display_name, \`rank\`, rank_locked, avatar_url, created_at
+      `SELECT id, username, email, display_name, \`rank\`, rank_locked, avatar_url, created_at,
+              afk_until, afk_reason
        FROM users
        ${whereClause}
        ORDER BY FIELD(\`rank\`, "guildmaster","officer","veteran","member","recruit"), created_at ASC

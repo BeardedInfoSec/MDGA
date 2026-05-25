@@ -30,6 +30,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     const [users] = await pool.execute(
       `SELECT u.id, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm,
               u.character_name, u.discord_username, u.created_at,
+              u.afk_until, u.afk_reason, u.afk_set_at,
               uc_main.character_name AS main_character_name,
               uc_main.realm_slug AS main_realm_slug
        FROM users u
@@ -75,6 +76,46 @@ router.get('/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Get profile error:', err);
     res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// PUT /api/profile/afk — set an AFK notice on the authenticated user.
+// Body: { days: 30|60|90|180, reason: string<=255 }
+// Days picker is fixed to a small allowlist so we don't accept arbitrary
+// future dates (a 5-year AFK isn't an "audit hint", it's a leave). The
+// resulting `afk_until` is today + days, stored as a DATE.
+const AFK_DAY_OPTIONS = new Set([7, 14, 30, 60, 90, 180]);
+
+router.put('/afk', requireAuth, async (req, res) => {
+  try {
+    const days = Number(req.body && req.body.days);
+    const reason = String((req.body && req.body.reason) || '').trim().slice(0, 255);
+    if (!AFK_DAY_OPTIONS.has(days)) {
+      return res.status(400).json({ error: 'days must be one of 7, 14, 30, 60, 90, 180' });
+    }
+    const afkUntil = DateTime.utc().plus({ days }).toFormat('yyyy-MM-dd');
+    await pool.execute(
+      'UPDATE users SET afk_until = ?, afk_reason = ?, afk_set_at = NOW() WHERE id = ?',
+      [afkUntil, reason || null, req.user.id]
+    );
+    res.json({ afk_until: afkUntil, afk_reason: reason || null });
+  } catch (err) {
+    console.error('Set AFK notice error:', err);
+    res.status(500).json({ error: 'Failed to set AFK notice' });
+  }
+});
+
+// DELETE /api/profile/afk — clear the authenticated user's AFK notice.
+router.delete('/afk', requireAuth, async (req, res) => {
+  try {
+    await pool.execute(
+      'UPDATE users SET afk_until = NULL, afk_reason = NULL, afk_set_at = NULL WHERE id = ?',
+      [req.user.id]
+    );
+    res.json({ cleared: true });
+  } catch (err) {
+    console.error('Clear AFK notice error:', err);
+    res.status(500).json({ error: 'Failed to clear AFK notice' });
   }
 });
 

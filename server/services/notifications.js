@@ -16,6 +16,9 @@ const DEFAULT_PREFS = Object.freeze({
   reply: true,
   event: true,
   giveaway_kickoff: true,
+  // Off by default — opt-in (forum #61 idea 4). When true, mentions ALSO
+  // trigger a Discord DM in addition to the in-app notification.
+  dm_on_mention: false,
 });
 
 // Returns the user's effective preferences (merged with defaults).
@@ -215,13 +218,34 @@ async function broadcastNotification({ type, actorId = null, sourceType = null, 
 // Parse @mentions out of `text`, resolve to users, and create mention
 // notifications. Returns the list of notified user ids. Safe to call
 // fire-and-forget — failures log without throwing.
+//
+// If a recipient has dm_on_mention=true in their prefs AND has a linked
+// Discord id, also fires a Discord DM with the link to the page. Dedupe
+// at the createNotification layer is sufficient — only NEW (non-deduped)
+// notifications trigger a DM, so a re-edit storm doesn't spam DMs.
 async function notifyMentions({ text, actorId, sourceType, sourceId, title, linkUrl }) {
   const names = extractMentionedNames(text);
   if (names.length === 0) return [];
   const users = await resolveMentionedUsers(names);
+  if (users.length === 0) return [];
+
+  // Pull Discord-id + prefs for everyone we're about to notify in one
+  // query — saves N round-trips on a multi-mention post.
+  const userIds = users.map((u) => u.id);
+  const placeholders = userIds.map(() => '?').join(',');
+  const [meta] = await pool.execute(
+    `SELECT id, discord_id, notification_prefs FROM users WHERE id IN (${placeholders})`,
+    userIds
+  );
+  const metaById = new Map(meta.map((r) => [r.id, r]));
+
+  // Lazy-require to avoid bot.js loading at server startup if the route
+  // module imports notifications.js before the bot is wired.
+  let sendDirectMessage = null;
+
   const ids = [];
   for (const u of users) {
-    const id = await createNotification({
+    const created = await createNotification({
       userId: u.id,
       type: 'mention',
       actorId,
@@ -230,15 +254,52 @@ async function notifyMentions({ text, actorId, sourceType, sourceId, title, link
       title,
       linkUrl,
     });
-    if (id) ids.push(u.id);
+    if (!created) continue; // muted, deduped, or insert failed — skip DM too
+    ids.push(u.id);
+
+    const row = metaById.get(u.id);
+    if (!row || !row.discord_id) continue;
+    let prefs = DEFAULT_PREFS;
+    if (row.notification_prefs) {
+      try {
+        const parsed = typeof row.notification_prefs === 'string'
+          ? JSON.parse(row.notification_prefs)
+          : row.notification_prefs;
+        prefs = { ...DEFAULT_PREFS, ...parsed };
+      } catch { /* fall back to defaults */ }
+    }
+    if (prefs.dm_on_mention !== true) continue;
+
+    if (!sendDirectMessage) {
+      try { sendDirectMessage = require('../bot').sendDirectMessage; }
+      catch { sendDirectMessage = null; }
+    }
+    if (!sendDirectMessage) continue;
+
+    const absUrl = /^https?:\/\//i.test(linkUrl) ? linkUrl : `https://mdga.gg${linkUrl}`;
+    const body = `You were mentioned on MDGA: **${String(title).slice(0, 160)}**\n${absUrl}`;
+    sendDirectMessage(row.discord_id, body).catch(() => null);
   }
   return ids;
+}
+
+// Edit-aware variant of notifyMentions: notify only people who appear in
+// `newText` but not in `oldText`. Prevents re-DMing the same recipient on
+// every typo fix while still firing for fresh @-tags introduced by an edit.
+async function notifyNewMentions({ oldText, newText, actorId, sourceType, sourceId, title, linkUrl }) {
+  const oldNames = new Set(extractMentionedNames(oldText || '').map((n) => n.toLowerCase()));
+  const added = extractMentionedNames(newText || '').filter((n) => !oldNames.has(n.toLowerCase()));
+  if (added.length === 0) return [];
+  // Reuse notifyMentions by handing it just the newly-added @tokens.
+  const synthetic = added.map((n) => `@${n}`).join(' ');
+  return notifyMentions({ text: synthetic, actorId, sourceType, sourceId, title, linkUrl });
 }
 
 module.exports = {
   createNotification,
   broadcastNotification,
   notifyMentions,
+  notifyNewMentions,
   extractMentionedNames,
   resolveMentionedUsers,
 };

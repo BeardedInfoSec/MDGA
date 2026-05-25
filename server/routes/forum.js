@@ -4,7 +4,7 @@ const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
 const { logAdminAction } = require('../services/audit-log');
 const { sendOfficerAlert, sendDiscordAnnouncement } = require('../bot');
-const { notifyMentions, createNotification, broadcastNotification } = require('../services/notifications');
+const { notifyMentions, notifyNewMentions, createNotification, broadcastNotification } = require('../services/notifications');
 const { DateTime } = require('luxon');
 
 const router = express.Router();
@@ -324,18 +324,23 @@ router.get('/categories/:id/posts', async (req, res) => {
     }
     const resolvedCategoryId = catRows[0].id;
 
+    // Sort order for the *unpinned* slice. Pinned posts are fetched in a
+     // separate query (no LIMIT) and always sit on top, so the per-mode order
+     // here doesn't include `fp.pinned DESC` — that was load-bearing only when
+     // both sets shared a paginated query. Splitting fixes two reports from
+     // forum #53: (a) when offset>0 unpinned could appear ABOVE pinned because
+     // pins had been paged past, and (b) heavy pinning ate into the per-page
+     // budget for unpinned posts.
     let orderClause;
     if (sort === 'new') {
-      orderClause = 'fp.pinned DESC, fp.created_at DESC';
+      orderClause = 'fp.created_at DESC';
     } else if (sort === 'top') {
-      orderClause = 'fp.pinned DESC, net_votes DESC, fp.created_at DESC';
+      orderClause = 'net_votes DESC, fp.created_at DESC';
     } else if (sort === 'hot') {
-      // Hot: Reddit-style — log(score) + age_bonus
-      orderClause = 'fp.pinned DESC, (LOG10(GREATEST(ABS(COALESCE(vote_sum.net_votes, 0)) + 1, 1)) + UNIX_TIMESTAMP(fp.created_at) / 45000) DESC';
+      orderClause = '(LOG10(GREATEST(ABS(COALESCE(vote_sum.net_votes, 0)) + 1, 1)) + UNIX_TIMESTAMP(fp.created_at) / 45000) DESC';
     } else {
       // active (default) — most recent activity, post.updated_at or newest comment.
-      // Pins always float to the top first.
-      orderClause = 'fp.pinned DESC, last_activity_at DESC';
+      orderClause = 'last_activity_at DESC';
     }
 
     // last_activity = newest of post.updated_at and the most recent live
@@ -343,7 +348,8 @@ router.get('/categories/:id/posts', async (req, res) => {
     // Anonymous viewers always see is_unread = 0 (no per-user tracking).
     const viewerIdForQuery = viewer ? viewer.id : 0;
     const publishGate = canSeeScheduled(viewer) ? '' : `AND ${PUBLISH_FILTER_SQL}`;
-    const [posts] = await pool.execute(`
+
+    const buildPostSelect = (pinFilter, withLimit) => `
       SELECT fp.*, u.username, u.display_name, u.avatar_url, u.\`rank\`, u.display_rank, u.realm, u.character_name,
         u.status AS user_status,
         uc_main.character_name AS main_character_name,
@@ -387,22 +393,37 @@ router.get('/categories/:id/posts', async (req, res) => {
         FROM forum_votes GROUP BY post_id
       ) vote_sum ON vote_sum.post_id = fp.id
       LEFT JOIN forum_post_views view_row ON view_row.post_id = fp.id AND view_row.user_id = ?
-      WHERE fp.category_id = ? AND fp.deleted_at IS NULL ${publishGate}
+      WHERE fp.category_id = ? AND fp.deleted_at IS NULL ${publishGate} AND ${pinFilter}
       ORDER BY ${orderClause}
-      LIMIT ${limit} OFFSET ${offset}
-    `, [viewerIdForQuery, viewerIdForQuery, resolvedCategoryId]);
+      ${withLimit ? `LIMIT ${limit} OFFSET ${offset}` : ''}
+    `;
+
+    // Pinned: always fetched in full, no pagination — they sit above the
+    // unpinned slice on every page so officers can rely on pins being visible.
+    const [pinnedPosts] = await pool.execute(
+      buildPostSelect('fp.pinned = 1', false),
+      [viewerIdForQuery, viewerIdForQuery, resolvedCategoryId]
+    );
+
+    // Unpinned: paginated independently so the per-page limit applies only to
+    // them. Total/page count below reflects this slice, not pinned+unpinned.
+    const [unpinnedPosts] = await pool.execute(
+      buildPostSelect('fp.pinned = 0', true),
+      [viewerIdForQuery, viewerIdForQuery, resolvedCategoryId]
+    );
 
     const [countResult] = await pool.execute(
       `SELECT COUNT(*) AS total FROM forum_posts fp
-       WHERE category_id = ? AND deleted_at IS NULL ${publishGate}`,
+       WHERE category_id = ? AND deleted_at IS NULL ${publishGate} AND fp.pinned = 0`,
       [resolvedCategoryId]
     );
 
     res.json({
       category: catRows[0] || null,
-      posts,
+      posts: [...pinnedPosts, ...unpinnedPosts],
+      pinned_count: pinnedPosts.length,
       sort,
-      pagination: { page, limit, total: countResult[0].total, pages: Math.ceil(countResult[0].total / limit) },
+      pagination: { page, limit, total: countResult[0].total, pages: Math.max(1, Math.ceil(countResult[0].total / limit)) },
     });
   } catch (err) {
     console.error('Get posts error:', err);
@@ -1011,7 +1032,7 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
           postUrl,
         ].join('\n'),
         0xD4AF37,
-        { imageUrls: postImages, galleryUrl: postUrl }
+        { imageUrls: postImages, galleryUrl: postUrl, ping: 'here' }
       );
       if (sent) announced[key] = 1;
     } catch (err) {
@@ -1038,7 +1059,7 @@ async function checkGiveawayWinner(postId, newCommentId, giveaway, actingUser) {
           postUrl,
         ].join('\n'),
         0xB91C1C,
-        { imageUrls: postImages, galleryUrl: postUrl }
+        { imageUrls: postImages, galleryUrl: postUrl, ping: 'here' }
       );
       if (!sent) {
         // Bot couldn't post — un-mark so we retry on the next comment.
@@ -1470,6 +1491,21 @@ router.put('/posts/:id', requireAuth, async (req, res) => {
         summary: `Edited post #${id} (${titleChanged ? 'title+' : ''}${contentChanged ? 'body' : ''})`,
       });
     }
+
+    // Notify any @mentions newly introduced by this edit (forum #61 idea 4).
+    // notifyNewMentions diffs old vs new tokens so users already mentioned
+    // in the previous revision don't get re-notified.
+    if (contentChanged) {
+      notifyNewMentions({
+        oldText: existing.content,
+        newText: cleanContent,
+        actorId: req.user.id,
+        sourceType: 'forum_post',
+        sourceId: id,
+        title: `${req.user.username} mentioned you in: ${cleanTitle.slice(0, 100)}`,
+        linkUrl: `/forum/post/${id}`,
+      }).catch((err) => console.error('[notifications] post-edit mention failed:', err.message));
+    }
     res.json({ message: 'Post updated' });
   } catch (err) {
     console.error('Edit post error:', err);
@@ -1486,7 +1522,10 @@ router.put('/comments/:id', requireAuth, async (req, res) => {
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid comment id' });
 
     const [[existing]] = await pool.execute(
-      'SELECT id, user_id, content FROM forum_comments WHERE id = ? AND deleted_at IS NULL',
+      `SELECT fc.id, fc.user_id, fc.content, fc.post_id, fp.title AS post_title
+         FROM forum_comments fc
+         JOIN forum_posts fp ON fp.id = fc.post_id
+        WHERE fc.id = ? AND fc.deleted_at IS NULL`,
       [id]
     );
     if (!existing) return res.status(404).json({ error: 'Comment not found' });
@@ -1519,6 +1558,18 @@ router.put('/comments/:id', requireAuth, async (req, res) => {
         summary: `Edited comment #${id}`,
       });
     }
+
+    // Fire mention notifications for newly-added @tokens (forum #61 idea 4).
+    notifyNewMentions({
+      oldText: existing.content,
+      newText: cleanContent,
+      actorId: req.user.id,
+      sourceType: 'comment',
+      sourceId: id,
+      title: `${req.user.username} mentioned you in "${String(existing.post_title || '').slice(0, 100)}"`,
+      linkUrl: `/forum/post/${existing.post_id}#comment-${id}`,
+    }).catch((err) => console.error('[notifications] comment-edit mention failed:', err.message));
+
     res.json({ message: 'Comment updated' });
   } catch (err) {
     console.error('Edit comment error:', err);
@@ -1890,7 +1941,7 @@ router.put('/posts/:id/giveaway', requireAuth, async (req, res) => {
             `Giveaway started: ${postRow.title}`,
             description,
             0xD4AF37,
-            { imageUrls: postImages, galleryUrl: postUrl }
+            { imageUrls: postImages, galleryUrl: postUrl, ping: 'here' }
           ).catch((err) => { console.error('Giveaway kickoff announcement failed:', err.message); return false; });
           if (sent) {
             await pool.execute('UPDATE giveaway_configs SET kickoff_announced_at = NOW() WHERE post_id = ?', [postId])
@@ -1997,7 +2048,7 @@ async function processGiveawaySchedule() {
               postUrl,
             ].join('\n'),
             0xB91C1C, // red — feels like a countdown
-            { imageUrls: postImages, galleryUrl: postUrl }
+            { imageUrls: postImages, galleryUrl: postUrl, ping: 'here' }
           ).catch((err) => { console.error(`Drop warning send failed (post ${row.post_id}, ${minutes}m):`, err.message); return false; });
 
           if (sent) {
@@ -2045,7 +2096,7 @@ async function processGiveawaySchedule() {
           `Giveaway started: ${row.title}`,
           description,
           0xD4AF37,
-          { imageUrls: postImages, galleryUrl: postUrl }
+          { imageUrls: postImages, galleryUrl: postUrl, ping: 'here' }
         ).catch((err) => { console.error(`Deferred kickoff failed (post ${row.post_id}):`, err.message); return false; });
 
         if (sent) {

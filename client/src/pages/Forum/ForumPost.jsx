@@ -970,10 +970,18 @@ export default function ForumPost() {
                         {editingCommentId === c.id ? (
                           <div className={styles.commentEditForm}>
                             <MarkdownEditor
+                              id="forum-edit-comment-textarea"
                               value={editingCommentText}
                               onChange={setEditingCommentText}
                               rows={5}
                               maxLength={REPLY_MAX + 100}
+                              placeholder="Edit your comment… Markdown supported. Type @ to mention."
+                            />
+                            <MentionSuggest
+                              textareaId="forum-edit-comment-textarea"
+                              value={editingCommentText}
+                              onChange={setEditingCommentText}
+                              apiFetch={apiFetch}
                             />
                             {editingCommentError && <Alert tone="error">{editingCommentError}</Alert>}
                             <div className={styles.commentEditActions}>
@@ -1143,7 +1151,13 @@ export default function ForumPost() {
               </label>
               <label style={{ display: 'block' }}>
                 <span style={{ display: 'block', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2, color: 'var(--color-text-secondary)', marginBottom: 4 }}>Content (markdown supported)</span>
-                <MarkdownEditor value={editContent} onChange={setEditContent} rows={10} />
+                <MarkdownEditor id="forum-edit-textarea" value={editContent} onChange={setEditContent} rows={10} placeholder="Edit your post… Markdown supported. Type @ to mention." />
+                <MentionSuggest
+                  textareaId="forum-edit-textarea"
+                  value={editContent}
+                  onChange={setEditContent}
+                  apiFetch={apiFetch}
+                />
               </label>
               {(isOfficer() || hasPermission('forum.schedule_posts')) && (
                 <div style={{ display: 'block', marginTop: 12 }}>

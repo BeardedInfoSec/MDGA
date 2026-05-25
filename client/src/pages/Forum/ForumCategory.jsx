@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { Link, useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
@@ -38,6 +38,7 @@ export default function ForumCategory() {
   const [allCategories, setAllCategories] = useState([]);
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [pinnedCount, setPinnedCount] = useState(0);
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState(searchParams.get('sort') || 'active');
@@ -70,6 +71,7 @@ export default function ForumCategory() {
       const data = await res.json();
       setCategory(data.category || null);
       setPosts(data.posts || []);
+      setPinnedCount(data.pinned_count || 0);
       setPagination(data.pagination || null);
     } catch (err) {
       console.error('Load posts error:', err);
@@ -223,7 +225,7 @@ export default function ForumCategory() {
             <p className={styles.forumEmptyState}>No posts yet. Be the first to post!</p>
           ) : (
             <div className={styles.forumPostList}>
-              {posts.map((post) => {
+              {posts.map((post, idx) => {
                 const displayName = authorDisplayName(post);
                 const profileLink = authorProfileLink(post);
                 const authorIsFormer = isFormerMember(post);
@@ -232,8 +234,16 @@ export default function ForumCategory() {
                 const cls = post.pinned
                   ? `${styles.forumPostRowPinned}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`
                   : `${styles.forumPostRow}${post.locked ? ` ${styles.forumPostRowLocked}` : ''}`;
+                // Insert a visual divider after the last pinned post when both
+                // pinned and unpinned exist on this page. Backend returns pinned
+                // first, so the boundary is at idx === pinnedCount.
+                const showDivider = pinnedCount > 0 && idx === pinnedCount && posts.length > pinnedCount;
                 return (
-                  <Link key={post.id} to={postUrl(post)} className={cls}>
+                  <Fragment key={post.id}>
+                  {showDivider && (
+                    <div className={styles.forumPinnedDivider} aria-hidden="true" />
+                  )}
+                  <Link to={postUrl(post)} className={cls}>
                     <div className={styles.forumPostTitle}>
                       {post.is_unread ? <span className={styles.forumUnreadDot} aria-label="Unread" title="New since your last visit" /> : null}
                       {cleanForumTitle(post.title)}
@@ -262,6 +272,7 @@ export default function ForumCategory() {
                       </span>
                     </div>
                   </Link>
+                  </Fragment>
                 );
               })}
             </div>

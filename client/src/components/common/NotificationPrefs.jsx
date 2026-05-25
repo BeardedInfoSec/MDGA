@@ -7,6 +7,7 @@ const TYPES = [
   { key: 'reply', label: 'Replies on my posts', hint: 'Someone comments on a post you authored' },
   { key: 'event', label: 'New events', hint: 'An officer creates a new event' },
   { key: 'giveaway_kickoff', label: 'Giveaway drops', hint: 'A scheduled giveaway goes live' },
+  { key: 'dm_on_mention', label: 'DM me when mentioned', hint: 'Also send a Discord DM in addition to the in-app bell', defaultOff: true },
 ];
 
 // Inline notification preferences panel for the profile page (own-profile
@@ -63,7 +64,9 @@ export default function NotificationPrefs() {
       </div>
       <ul className={styles.list}>
         {TYPES.map((t) => {
-          const on = prefs[t.key] !== false;
+          // Most toggles default ON (undefined === enabled). dm_on_mention
+          // defaults OFF (opt-in) — flip the polarity for that one.
+          const on = t.defaultOff ? (prefs[t.key] === true) : (prefs[t.key] !== false);
           return (
             <li key={t.key} className={styles.row}>
               <div className={styles.rowText}>

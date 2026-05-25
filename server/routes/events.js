@@ -6,10 +6,54 @@ const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
 const { broadcastNotification } = require('../services/notifications');
+const { sendDiscordAnnouncement } = require('../bot');
 
 const router = express.Router();
 const VALID_EVENT_CATEGORIES = new Set(['pvp', 'defense', 'social', 'raid']);
 const VALID_RECURRENCE_TYPES = new Set(['weekly', 'biweekly', 'custom']);
+
+// Channels for event Discord fanout (forum #61 follow-up):
+//   General — every member sees the drop in the main channel
+//   Events  — dedicated channel where the event roster lives
+// Both pinged with @here so online members get a notification once per channel.
+const EVENT_DISCORD_CHANNELS = ['1323847886248738888', '1483266989647724758'];
+
+function buildEventDiscordDescription({ startsAtUtc, timezone, category, description, prize }) {
+  // Render the start time in the event's authoring timezone so it matches
+  // what the creator saw in the form. Members in other zones can hover the
+  // /events page for their own conversion — Discord embeds don't get
+  // per-viewer localization.
+  //
+  // startsAtUtc is the SQL string `yyyy-MM-dd HH:mm:ss` (already in UTC,
+  // built by localToUtc above). Parse via fromSQL with zone:'utc' rather
+  // than the Date constructor, which is environment-dependent for this
+  // format and silently treats it as local time on some Node versions.
+  const whenLocal = DateTime.fromSQL(String(startsAtUtc), { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('cccc, LLL d • h:mm a ZZZZ');
+  const lines = [
+    `**When:** ${whenLocal}`,
+    `**Category:** ${String(category || '').toUpperCase()}`,
+  ];
+  if (prize) lines.push(`**Prize:** ${String(prize).slice(0, 200)}`);
+  if (description) {
+    const trimmed = String(description).trim().slice(0, 1200);
+    if (trimmed) lines.push('', trimmed);
+  }
+  lines.push('', 'https://mdga.gg/events');
+  return lines.join('\n');
+}
+
+async function announceEventToDiscord({ title, startsAtUtc, timezone, category, description, prize }) {
+  const desc = buildEventDiscordDescription({ startsAtUtc, timezone, category, description, prize });
+  for (const channelId of EVENT_DISCORD_CHANNELS) {
+    try {
+      await sendDiscordAnnouncement(channelId, `New event: ${title}`, desc, 0x4F46E5, { ping: 'here' });
+    } catch (err) {
+      console.error(`[events] discord fanout failed (channel ${channelId}):`, err.message);
+    }
+  }
+}
 
 function isValidTimezone(tz) {
   try {
@@ -277,6 +321,12 @@ router.post('/', requireAuth, requirePermission('events.manage'), async (req, re
           title: `${req.user.username} added a new event: ${String(title).slice(0, 100)}`,
           linkUrl: '/events',
         }).catch((err) => console.error('[notifications] event broadcast failed:', err));
+        // Discord fanout to General + Events channels with @here.
+        // setImmediate so the HTTP response isn't blocked by the bot send.
+        setImmediate(() => {
+          announceEventToDiscord({ title, startsAtUtc, timezone, category, description, prize: prizeValue })
+            .catch((err) => console.error('[events] discord fanout error:', err.message));
+        });
       }
       res.status(201).json({ id: result.insertId, message: 'Event created' });
     }

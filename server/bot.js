@@ -774,6 +774,18 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
     const channel = await client.channels.fetch(target);
     if (!channel) return false;
 
+    // ping: 'here' | 'everyone' | undefined — when set, prepend the mention
+    // token in the message content AND whitelist it in allowedMentions so
+    // Discord actually fans it out (without the whitelist, the @here token
+    // renders as literal text). Callers default to undefined for embeds that
+    // shouldn't notify the channel.
+    const pingToken = options.ping === 'here' ? '@here'
+      : options.ping === 'everyone' ? '@everyone'
+      : null;
+    const allowedMentions = pingToken
+      ? { parse: [options.ping] }
+      : { parse: [] };
+
     // Discord trick for multi-image embeds: multiple embeds sharing the
     // same URL property render as a single grouped gallery (up to 4
     // images shown). Callers pass either options.imageUrl (single) or
@@ -789,7 +801,7 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
         .setDescription(description)
         .setColor(color)
         .setTimestamp();
-      await channel.send({ embeds: [embed] });
+      await channel.send({ content: pingToken || undefined, embeds: [embed], allowedMentions });
       return true;
     }
 
@@ -805,7 +817,7 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
       }
       return e;
     });
-    await channel.send({ embeds });
+    await channel.send({ content: pingToken || undefined, embeds, allowedMentions });
     return true;
   } catch (err) {
     console.error(`sendDiscordAnnouncement error (channel ${target}):`, err.message);
@@ -813,4 +825,27 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
   }
 }
 
-module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendApplicationAlert, sendApplicationApprovedDM, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers };
+// Send a plain-text DM to a user by Discord id. Returns true on success.
+// Used by the @mention notification pipeline (forum #61 idea 4) — when a
+// member with dm_on_mention=true is tagged on the site, they get a DM with
+// a link to the page. Failure modes (DMs closed, user left server, bot
+// blocked) are silent; the in-app notification still landed.
+async function sendDirectMessage(discordId, content) {
+  if (!client || !client.isReady()) return false;
+  if (!discordId) return false;
+  try {
+    const u = await client.users.fetch(String(discordId)).catch(() => null);
+    if (!u) return false;
+    await u.send(String(content).slice(0, 1900));
+    return true;
+  } catch (err) {
+    // 50007 = "Cannot send messages to this user" (DMs closed). Common
+    // and not actionable — don't spam logs.
+    if (err && err.code !== 50007) {
+      console.warn(`sendDirectMessage(${discordId}) failed:`, err.message);
+    }
+    return false;
+  }
+}
+
+module.exports = { startBot, checkGuildMember, sendApprovalRequest, sendApplicationAlert, sendApplicationApprovedDM, sendOfficerAlert, sendDiscordAnnouncement, sendUnbanRequest, getGuildRoles, setMemberNickname, setMemberRoles, fetchAllGuildMembers, sendDirectMessage };
