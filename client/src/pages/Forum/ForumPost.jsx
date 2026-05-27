@@ -24,6 +24,33 @@ function cleanForumTitle(value) {
   return String(value || '').replace(CTRL_RE, '').trim();
 }
 
+// Make a "dismiss only on a true backdrop click" handler pair for modal
+// backdrops. The pattern fixes forum #67 idea 1: officers were losing
+// edits when they drag-selected text inside the editor and released the
+// mouse outside the modal — the resulting click fired on the backdrop
+// and closed it. We track whether mousedown started inside the card and
+// skip the dismiss on that case.
+//
+// Usage:
+//   const dragRef = useRef(false);
+//   <div {...backdropDismiss(dragRef, () => setOpen(false))}>...</div>
+function backdropDismiss(dragStartedInsideRef, onClose) {
+  return {
+    onMouseDown: (e) => {
+      // mousedown bubbles up from the card → if e.target !== currentTarget,
+      // the drag began inside the card.
+      dragStartedInsideRef.current = e.target !== e.currentTarget;
+    },
+    onClick: (e) => {
+      if (dragStartedInsideRef.current) {
+        dragStartedInsideRef.current = false;
+        return;
+      }
+      if (e.target === e.currentTarget) onClose();
+    },
+  };
+}
+
 const REPLY_MAX = 5000;
 
 export default function ForumPost() {
@@ -56,6 +83,11 @@ export default function ForumPost() {
   const commentImageRef = useRef(null);
   const [showRevisions, setShowRevisions] = useState(false);
   const [revisions, setRevisions] = useState(null);
+  // Shared "drag started inside the modal card" flag — used by every
+  // revisions/edit/giveaway backdrop so a text-selection drag that ends
+  // outside the modal doesn't accidentally dismiss it. Only one modal is
+  // ever open at a time so sharing one ref is safe.
+  const modalDragInsideRef = useRef(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
@@ -565,6 +597,8 @@ export default function ForumPost() {
         body: JSON.stringify({ content: commentText.trim(), imageUrl }),
       });
       if (res.ok) {
+        const created = await res.json().catch(() => ({}));
+        const newCommentId = created.id;
         setCommentText('');
         clearCommentImage();
         // Jump to the (likely) last page so the user sees their new
@@ -573,6 +607,12 @@ export default function ForumPost() {
         const lastPage = Math.max(1, Math.ceil(projected / COMMENTS_PER_PAGE));
         if (lastPage !== commentsPage) setCommentsPage(lastPage);
         else loadPost();
+        // Set the URL hash so the existing #comment-N effect scrolls the
+        // new row into view + highlights it once it actually lands in the
+        // comments array (forum #67 idea 5).
+        if (newCommentId) {
+          navigate(`${location.pathname}${location.search}#comment-${newCommentId}`, { replace: true });
+        }
       } else {
         const data = await res.json();
         setCommentError(data.error || 'Failed to post reply.');
@@ -1132,7 +1172,7 @@ export default function ForumPost() {
       </div>
 
       {editOpen && (
-        <div className={styles.revisionsBackdrop} onClick={() => setEditOpen(false)} role="dialog" aria-modal="true">
+        <div className={styles.revisionsBackdrop} {...backdropDismiss(modalDragInsideRef, () => setEditOpen(false))} role="dialog" aria-modal="true">
           <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
             <header className={styles.revisionsHeader}>
               <h2>Edit post</h2>
@@ -1225,7 +1265,7 @@ export default function ForumPost() {
       )}
 
       {commentRevisionsId !== null && (
-        <div className={styles.revisionsBackdrop} onClick={() => setCommentRevisionsId(null)} role="dialog" aria-modal="true">
+        <div className={styles.revisionsBackdrop} {...backdropDismiss(modalDragInsideRef, () => setCommentRevisionsId(null))} role="dialog" aria-modal="true">
           <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
             <header className={styles.revisionsHeader}>
               <h2>Edit history — reply #{commentRevisionsId}</h2>
@@ -1254,7 +1294,7 @@ export default function ForumPost() {
       )}
 
       {giveawayOpen && (
-        <div className={styles.revisionsBackdrop} onClick={() => setGiveawayOpen(false)} role="dialog" aria-modal="true">
+        <div className={styles.revisionsBackdrop} {...backdropDismiss(modalDragInsideRef, () => setGiveawayOpen(false))} role="dialog" aria-modal="true">
           <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
             <header className={styles.revisionsHeader}>
               <h2>Configure giveaway — post #{post.id}</h2>
@@ -1361,7 +1401,7 @@ export default function ForumPost() {
       )}
 
       {showRevisions && (
-        <div className={styles.revisionsBackdrop} onClick={() => setShowRevisions(false)} role="dialog" aria-modal="true">
+        <div className={styles.revisionsBackdrop} {...backdropDismiss(modalDragInsideRef, () => setShowRevisions(false))} role="dialog" aria-modal="true">
           <div className={styles.revisionsCard} onClick={(e) => e.stopPropagation()}>
             <header className={styles.revisionsHeader}>
               <h2>Edit history — post #{post.id}</h2>

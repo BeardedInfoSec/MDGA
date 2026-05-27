@@ -29,7 +29,11 @@
 }
 .markdown a:hover { color: var(--color-gold-light); border-bottom-color: var(--color-gold); }
 .markdown a[data-mdga-external="1"]::after {
-  content: '\\2197';
+  /* Use the literal North-East Arrow character (U+2197) rather than the
+     CSS unicode-escape '\2197'. The previous double-backslash form
+     ('\\2197') was wrong for plain CSS and rendered as the literal four
+     characters `\2197` next to every external link (forum #69). */
+  content: '\2197';
   font-size: 0.85em;
   margin-left: 2px;
   opacity: 0.7;

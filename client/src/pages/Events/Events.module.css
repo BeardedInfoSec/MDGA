@@ -587,6 +587,10 @@
   color: var(--color-text-primary);
   line-height: 1.5;
   margin: 0;
+  /* Allow long unbroken strings (URLs, etc.) to wrap rather than overflow
+     the agenda card and push the layout off the right margin (forum #70). */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .agendaItemPrize {
@@ -761,6 +765,52 @@
   background: var(--color-gray-800);
   border: 1px solid var(--color-gray-700);
   color: var(--color-text-secondary);
+}
+
+/* LIVE and STARTING SOON pills next to event titles (forum #65). LIVE is
+   the loudest treatment (red, pulsing dot) so a glance picks it out;
+   STARTING SOON is gold so it reads as a heads-up, not an alert. */
+.liveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(220, 38, 38, 0.18);
+  border: 1px solid #DC2626;
+  color: #FCA5A5;
+}
+.liveBadge::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #DC2626;
+  animation: livePulse 1.5s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.startingSoonBadge {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(212, 175, 55, 0.15);
+  border: 1px solid var(--color-gold-dark);
+  color: var(--color-gold);
 }
 
 .eventTag {

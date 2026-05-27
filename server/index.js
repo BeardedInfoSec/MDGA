@@ -48,10 +48,21 @@ app.use(ipBanMiddleware);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Global rate limiter for API routes
+// Global rate limiter for API routes.
+// Anonymous traffic: 200/15min — tight, since unauthenticated requests
+// have no audit trail and are the actual abuse target.
+// Authenticated traffic (Bearer token present): 2000/15min — power users
+// like officers running admin pages or members during a giveaway launch
+// blew past the old flat 200 limit, causing the dashboard + forum to
+// silently render empty (the frontend treats 429 the same as no data).
+// The Bearer check is throttling, not security — a forged token gets the
+// bigger bucket but every request still 401s downstream, no breach.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: (req) => {
+    const auth = req.headers.authorization;
+    return (auth && auth.startsWith('Bearer ')) ? 2000 : 200;
+  },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -75,6 +86,23 @@ app.use('/images', express.static(path.join(APP_ROOT, 'images'), {
   setHeaders: (res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'public, max-age=86400');
+  },
+}));
+
+// Serve /wow_addon as static so audit-tool and addon downloads land as
+// real files. Without this mount, /wow_addon/* falls through to the SPA
+// fallback below and the browser receives index.html bytes saved as
+// `.zip` — appears corrupt (rapazzini forum #72).
+app.use('/wow_addon', express.static(path.join(APP_ROOT, 'wow_addon'), {
+  dotfiles: 'deny',
+  index: false,
+  fallthrough: false,
+  setHeaders: (res, filePath) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (filePath.endsWith('.zip')) {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${path.basename(filePath)}"`);
+    }
   },
 }));
 

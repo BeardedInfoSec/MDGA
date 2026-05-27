@@ -12,8 +12,13 @@ const { sendApprovalEmail } = require('./services/email');
 const BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const OFFICER_CHANNEL_ID = process.env.DISCORD_OFFICER_CHANNEL_ID;
-// #guild-invite-request channel — referenced in approval DMs so the
-// applicant knows exactly where to go for their in-game invite.
+
+// #guild-invite-request channel — used for two things:
+//   1. Posting full guild-application requests + Approve/Deny buttons
+//      (officers act here; community-visible so members see the activity).
+//      The officer channel gets a notice-only mirror.
+//   2. Referenced in approval DMs so the applicant knows exactly where to
+//      go for their in-game invite.
 // Falls back to a known channel id if the env var isn't set.
 const GUILD_INVITE_REQUEST_CHANNEL_ID =
   process.env.DISCORD_GUILD_INVITE_REQUEST_CHANNEL_ID || '1376339634833068194';
@@ -57,6 +62,45 @@ function startBot() {
 
     const userId = parseInt(idStr);
     if (!userId) return;
+
+    // Officer/guildmaster permission gate — non-officers can SEE the
+    // buttons (the invite-request channel is community-visible) but only
+    // officers can ACT. We resolve by checking the interactor's Discord
+    // role ids against discord_role_mappings rows whose site_rank is
+    // 'officer' or 'guildmaster'. Falls open (allows the click) only if
+    // the mappings table is empty — otherwise we'd lock everyone out on
+    // a misconfigured deploy.
+    try {
+      const member = interaction.member;
+      const memberRoleIds = member?.roles?.cache
+        ? new Set(member.roles.cache.keys())
+        : new Set(Array.isArray(member?.roles) ? member.roles.map(String) : []);
+      const [officerRoleRows] = await pool.execute(
+        "SELECT discord_role_id FROM discord_role_mappings WHERE site_rank IN ('officer','guildmaster')"
+      );
+      if (officerRoleRows.length > 0) {
+        const allowed = officerRoleRows.some((r) => memberRoleIds.has(String(r.discord_role_id)));
+        if (!allowed) {
+          await interaction.reply({
+            content: 'Only officers or higher can approve / deny these requests.',
+            ephemeral: true,
+          });
+          console.log(`[interaction] denied ${action}:${idStr} from ${interaction.user.tag} — not an officer`);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('[interaction] officer-role check failed:', err.message);
+      // On lookup failure, deny rather than allow — safer default for
+      // a permission-critical path.
+      try {
+        await interaction.reply({
+          content: 'Permission check failed — try again, or contact an admin.',
+          ephemeral: true,
+        });
+      } catch { /* interaction already replied */ }
+      return;
+    }
 
     try {
       if (action === 'approve_app' || action === 'deny_app') {
@@ -418,19 +462,22 @@ async function sendApprovalRequest(user) {
   }
 }
 
-// Send a new-guild-application alert to the officer channel. Used by
-// POST /api/applications instead of the old DISCORD_WEBHOOK_URL path
-// (that env var sometimes goes unset, silently dropping notifications).
-// Includes Approve/Deny buttons so officers can review without leaving
-// Discord — handlers live in the interactionCreate listener below.
+// Send a new-guild-application alert. Fanout:
+//   guild-invite-request channel — full embed + Approve/Deny buttons.
+//     Officers act here; the channel is community-visible so members can
+//     see who's applying.
+//   officer channel — same embed, NO buttons, prepended with a pointer.
+//     Operational log so officers who watch the officer channel still see
+//     the activity without it being the action surface.
+// Permission check on the buttons themselves lives in the interactionCreate
+// handler — only Discord users with an officer/guildmaster mapped role can
+// click them. See discord_role_mappings table.
 async function sendApplicationAlert(app) {
-  if (!client || !client.isReady() || !OFFICER_CHANNEL_ID) {
-    console.warn('Cannot send application alert — bot not ready or no officer channel configured');
+  if (!client || !client.isReady()) {
+    console.warn('Cannot send application alert — bot not ready');
     return false;
   }
   try {
-    const channel = await client.channels.fetch(OFFICER_CHANNEL_ID);
-    if (!channel) return false;
     const embed = new EmbedBuilder()
       .setTitle('New Guild Application')
       .setColor(0xB91C1C)
@@ -454,8 +501,43 @@ async function sendApplicationAlert(app) {
         .setLabel('Deny')
         .setStyle(ButtonStyle.Danger),
     );
-    await channel.send({ embeds: [embed], components: [row] });
-    return true;
+
+    // Primary post: full request + buttons in guild-invite-request channel.
+    let primarySent = false;
+    try {
+      const inviteChannel = await client.channels.fetch(GUILD_INVITE_REQUEST_CHANNEL_ID);
+      if (inviteChannel) {
+        await inviteChannel.send({ embeds: [embed], components: [row] });
+        primarySent = true;
+      }
+    } catch (err) {
+      console.error(`sendApplicationAlert (invite channel ${GUILD_INVITE_REQUEST_CHANNEL_ID}):`, err.message);
+    }
+
+    // Mirror notice in the officer channel — no buttons (single source of
+    // truth for the action surface stays in guild-invite-request). If the
+    // primary send failed, the officer-channel post is the fallback and
+    // gets the buttons so officers can still act.
+    if (OFFICER_CHANNEL_ID) {
+      try {
+        const officerChannel = await client.channels.fetch(OFFICER_CHANNEL_ID);
+        if (officerChannel) {
+          if (primarySent) {
+            await officerChannel.send({
+              content: `New guild application — review in <#${GUILD_INVITE_REQUEST_CHANNEL_ID}>.`,
+              embeds: [embed],
+            });
+          } else {
+            // Fallback: invite channel send failed, so put the buttons here.
+            await officerChannel.send({ embeds: [embed], components: [row] });
+          }
+        }
+      } catch (err) {
+        console.error(`sendApplicationAlert (officer channel ${OFFICER_CHANNEL_ID}):`, err.message);
+      }
+    }
+
+    return primarySent;
   } catch (err) {
     console.error('sendApplicationAlert error:', err);
     return false;
@@ -779,11 +861,16 @@ async function sendDiscordAnnouncement(channelId, title, description, color = 0x
     // Discord actually fans it out (without the whitelist, the @here token
     // renders as literal text). Callers default to undefined for embeds that
     // shouldn't notify the channel.
+    //
+    // Discord's allowedMentions.parse only accepts 'roles'|'users'|'everyone'
+    // — there is no 'here' value. Passing 'everyone' authorizes BOTH @here
+    // and @everyone tokens to fire (the bot also needs the "Mention Everyone"
+    // channel permission either way).
     const pingToken = options.ping === 'here' ? '@here'
       : options.ping === 'everyone' ? '@everyone'
       : null;
     const allowedMentions = pingToken
-      ? { parse: [options.ping] }
+      ? { parse: ['everyone'] }
       : { parse: [] };
 
     // Discord trick for multi-image embeds: multiple embeds sharing the

@@ -298,6 +298,58 @@ router.delete('/recycle-bin/comments/:id', requireAuth, requirePermission('admin
   }
 });
 
+// Bulk-purge recycle bin (rapazzini forum #73). Two modes:
+//   { days: N }   — purge rows whose deleted_at is more than N days ago.
+//                   N=0 is rejected (use the "purge all" mode explicitly).
+//   { all: true } — purge every soft-deleted row regardless of age.
+// Counts and ages are measured from deleted_at (when it entered the bin),
+// not from created_at — which matches the user's expectation that the
+// "retention timer" starts when something gets deleted.
+router.post('/recycle-bin/prune', requireAuth, requirePermission('admin.manage_recycle_bin'), async (req, res) => {
+  try {
+    const all = req.body && req.body.all === true;
+    const days = req.body && Number.isInteger(req.body.days) ? req.body.days : null;
+
+    let postWhere, commentWhere, params, summary;
+    if (all) {
+      postWhere = 'deleted_at IS NOT NULL';
+      commentWhere = 'deleted_at IS NOT NULL';
+      params = [];
+      summary = 'Bulk-purged ALL recycle bin entries';
+    } else if (days !== null && days >= 1 && days <= 3650) {
+      postWhere = 'deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)';
+      commentWhere = 'deleted_at IS NOT NULL AND deleted_at < (NOW() - INTERVAL ? DAY)';
+      params = [days];
+      summary = `Bulk-purged recycle bin entries older than ${days} day(s)`;
+    } else {
+      return res.status(400).json({ error: 'Provide { all: true } or { days: 1..3650 }' });
+    }
+
+    const [postResult] = await pool.execute(
+      `DELETE FROM forum_posts WHERE ${postWhere}`,
+      params
+    );
+    const [commentResult] = await pool.execute(
+      `DELETE FROM forum_comments WHERE ${commentWhere}`,
+      params
+    );
+    logAdminAction({
+      adminUserId: req.user.id,
+      actionType: 'recycle_bin.bulk_purge',
+      targetType: 'forum',
+      targetId: null,
+      summary: `${summary} — ${postResult.affectedRows} post(s), ${commentResult.affectedRows} comment(s)`,
+    });
+    res.json({
+      posts_purged: postResult.affectedRows,
+      comments_purged: commentResult.affectedRows,
+    });
+  } catch (err) {
+    console.error('[admin/recycle-bin/prune]', err);
+    res.status(500).json({ error: 'Failed to prune recycle bin' });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // Account lock — adds an enforceable layer beyond status='banned'. Active
 // when account_locked_at is set AND (account_locked_until IS NULL OR > NOW()).

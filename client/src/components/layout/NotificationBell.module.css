@@ -187,9 +187,19 @@
   border-radius: 50%;
 }
 
+/* On narrow / mobile screens, anchor the dropdown to the viewport rather
+   than the bell so it never clips off-screen regardless of where the bell
+   sits in the nav. Previously `width: calc(100vw - 32px); right: -8px`
+   tried to do this from the absolute-positioned context, but if the bell
+   was near the viewport's right edge the dropdown's left edge still went
+   negative (forum #71). */
 @media (max-width: 640px) {
   .dropdown {
-    width: calc(100vw - 32px);
-    right: -8px;
+    position: fixed;
+    top: 60px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100vh - 80px);
   }
 }

@@ -72,7 +72,11 @@
   background: var(--color-gray-900);
   border: none;
   color: var(--color-text-primary);
-  resize: vertical;
+  /* Allow both-axis resize so users can widen the reply box when working
+     on a long reply (forum #67 idea 6). The textarea is still bounded by
+     its parent container's width, so a drag past that limit just hits the
+     wall — no overflow. */
+  resize: both;
   min-height: 100px;
   outline: none;
 }

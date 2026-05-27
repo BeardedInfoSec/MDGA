@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { formatEventDate, formatEventTimeOnly, getTimezoneAbbr, utcToDate } from '../../utils/timezone';
 import { fullDisplayName } from '../../utils/userDisplay';
+import MarkdownContent from '../../components/common/MarkdownContent';
 import styles from './Events.module.css';
 
 const VALID_CATEGORIES = ['pvp', 'defense', 'social', 'raid'];
@@ -279,10 +280,22 @@ export default function Events() {
   }, [isLoggedIn, apiFetch, rsvpState]);
 
   const now = new Date();
+  // Default event duration when ends_at is null. Previously the filter used
+  // ends_at || starts_at, so a no-end event flipped to "past" the moment it
+  // started (rapazzini forum #65). Two hours is the assumed run-time for an
+  // event that didn't specify an end.
+  const DEFAULT_LIVE_GRACE_MS = 2 * 60 * 60 * 1000;
+  function effectiveEnd(event) {
+    const start = event.starts_at ? utcToDate(event.starts_at) : null;
+    if (!start) return null;
+    if (event.ends_at) return utcToDate(event.ends_at);
+    return new Date(start.getTime() + DEFAULT_LIVE_GRACE_MS);
+  }
+
   const upcomingEvents = useMemo(() => events
     .filter((e) => {
       const start = e.starts_at ? utcToDate(e.starts_at) : null;
-      const end = e.ends_at ? utcToDate(e.ends_at) : start;
+      const end = effectiveEnd(e);
       return start && end >= now;
     })
     .sort((a, b) => utcToDate(a.starts_at) - utcToDate(b.starts_at)),
@@ -290,7 +303,7 @@ export default function Events() {
 
   const pastEvents = useMemo(() => events
     .filter((e) => {
-      const end = e.ends_at ? utcToDate(e.ends_at) : utcToDate(e.starts_at);
+      const end = effectiveEnd(e);
       return end && end < now;
     })
     .sort((a, b) => utcToDate(b.starts_at) - utcToDate(a.starts_at))
@@ -482,6 +495,14 @@ export default function Events() {
                         // NEXT treatment only applies in Upcoming view
                         const isNext = !isPast && countdown && event.id === countdown.event.id;
                         const screenshots = pastScreenshots[event.id] || [];
+                        // Live / starting-soon badges (rapazzini forum #65).
+                        // - LIVE: now is between starts_at and the effective end
+                        // - STARTING SOON: < 30m from start
+                        const startMs = event.starts_at ? utcToDate(event.starts_at).getTime() : 0;
+                        const endMs = effectiveEnd(event)?.getTime() || 0;
+                        const nowMs = now.getTime();
+                        const isLive = !isPast && startMs && startMs <= nowMs && nowMs < endMs;
+                        const isStartingSoon = !isPast && !isLive && startMs > nowMs && (startMs - nowMs) <= 30 * 60 * 1000;
                         return (
                           <li
                             key={event.id}
@@ -514,6 +535,12 @@ export default function Events() {
                               <div className={styles.agendaItemHead}>
                                 <h3 className={styles.agendaItemTitle}>{event.title}</h3>
                                 <span className={styles[TAG_STYLES[cat]]}>{CATEGORY_LABELS[cat]}</span>
+                                {isLive && (
+                                  <span className={styles.liveBadge} title="Event is happening now">LIVE</span>
+                                )}
+                                {isStartingSoon && (
+                                  <span className={styles.startingSoonBadge} title="Less than 30 minutes until start">STARTING SOON</span>
+                                )}
                                 {event.series_id && (
                                   <span className={styles.recurringBadge}>
                                     {event.series_index}/{event.series_total}
@@ -521,7 +548,9 @@ export default function Events() {
                                 )}
                               </div>
                               {event.description && (
-                                <p className={styles.agendaItemDesc}>{event.description}</p>
+                                <div className={styles.agendaItemDesc}>
+                                  <MarkdownContent source={event.description} />
+                                </div>
                               )}
                               {event.prize && (
                                 <div className={styles.agendaItemPrize} title="Prize for winners">

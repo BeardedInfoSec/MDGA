@@ -445,6 +445,16 @@ router.post('/posts', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Title must be 200 characters or less' });
     }
 
+    // Optional pin/lock on create (rapazzini forum #67 idea 4). Same
+    // permissions as the dedicated PUT toggles — silently drop if the user
+    // passed them without permission rather than 403, so the form can show
+    // the checkboxes conditionally and a stale-tab client doesn't wedge.
+    const _newPostPerms = req.user.permissions || [];
+    const _canPinNew = req.user.rank === 'guildmaster' || _newPostPerms.includes('forum.pin_posts');
+    const _canLockNew = req.user.rank === 'guildmaster' || _newPostPerms.includes('forum.lock_posts');
+    const pinnedOnCreate = (_canPinNew && req.body.pinned) ? 1 : 0;
+    const lockedOnCreate = (_canLockNew && req.body.locked) ? 1 : 0;
+
     // Optional scheduled publish (rapazzini forum #39). Only officers /
     // forum.schedule_posts may push a future date; regular members get NULL.
     //
@@ -495,8 +505,8 @@ router.post('/posts', requireAuth, async (req, res) => {
     }
 
     const [result] = await pool.execute(
-      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at, publish_timezone) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue, publishTimezoneValue]
+      'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at, publish_timezone, pinned, locked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue, publishTimezoneValue, pinnedOnCreate, lockedOnCreate]
     );
     const newPostId = result.insertId;
     // Multi-image attachments (forum #29). The single image_url stays

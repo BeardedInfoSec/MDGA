@@ -9,6 +9,10 @@ export default function RecycleBinAdmin({ apiFetch, showToast }) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('posts');
+  // Bulk-prune controls (forum #73). Default to 30 days — a reasonable
+  // retention window; admin can override.
+  const [pruneDays, setPruneDays] = useState(30);
+  const [pruning, setPruning] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,11 +61,78 @@ export default function RecycleBinAdmin({ apiFetch, showToast }) {
     else { showToast?.('Purge failed'); }
   }
 
+  async function prune(mode) {
+    let payload, confirmMsg;
+    if (mode === 'all') {
+      payload = { all: true };
+      confirmMsg = `PURGE ALL ${posts.length} post(s) and ${comments.length} comment(s) currently in the recycle bin? This cannot be undone.`;
+    } else {
+      const days = Math.max(1, Math.min(3650, parseInt(pruneDays, 10) || 0));
+      if (days < 1) { showToast?.('Days must be at least 1'); return; }
+      payload = { days };
+      confirmMsg = `Purge all recycle bin entries older than ${days} day(s)? This cannot be undone.`;
+    }
+    if (!window.confirm(confirmMsg)) return;
+    setPruning(true);
+    try {
+      const res = await apiFetch('/admin/recycle-bin/prune', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast?.(`Purged ${data.posts_purged} post(s), ${data.comments_purged} comment(s)`);
+        load();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast?.(`Prune failed: ${data.error || 'unknown error'}`);
+      }
+    } catch {
+      showToast?.('Prune failed');
+    } finally {
+      setPruning(false);
+    }
+  }
+
   return (
     <div className={styles.section}>
       <p className={styles.helper}>
         Soft-deleted posts and comments stay here until restored or permanently purged.
+        Retention age below is measured from when the item entered the bin, not when it was originally posted.
       </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 'var(--space-3)', padding: 'var(--space-2) var(--space-3)', background: 'var(--color-black-soft)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-sm)' }}>
+          <span>Prune entries older than</span>
+          <input
+            type="number"
+            min="1"
+            max="3650"
+            value={pruneDays}
+            onChange={(e) => setPruneDays(e.target.value)}
+            style={{ width: 70, padding: '4px 6px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)' }}
+          />
+          <span>day(s)</span>
+        </label>
+        <button
+          type="button"
+          className="btn btn--danger btn--sm"
+          onClick={() => prune('days')}
+          disabled={pruning || (posts.length === 0 && comments.length === 0)}
+        >
+          <Trash2 size={14} aria-hidden="true" /><span>{pruning ? 'Pruning…' : 'Prune older than'}</span>
+        </button>
+        <button
+          type="button"
+          className="btn btn--danger btn--sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => prune('all')}
+          disabled={pruning || (posts.length === 0 && comments.length === 0)}
+          title="Permanently delete every entry in the recycle bin"
+        >
+          <Trash2 size={14} aria-hidden="true" /><span>Prune all</span>
+        </button>
+      </div>
 
       <div className={styles.tabs}>
         <button type="button" className={`${styles.tab} ${tab === 'posts' ? styles.tabActive : ''}`} onClick={() => setTab('posts')}>

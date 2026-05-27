@@ -48,6 +48,11 @@ export default function ForumNewPost() {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'; }
     catch { return 'America/New_York'; }
   });
+  // Optional pin/lock on create (rapazzini forum #67 idea 4). Same
+  // permissions as the post-actions PUT endpoints. Checkbox visibility is
+  // gated on the same hasPermission()/isOfficer() check.
+  const [pinOnCreate, setPinOnCreate] = useState(false);
+  const [lockOnCreate, setLockOnCreate] = useState(false);
   // Inline giveaway config (forum.manage_giveaway only). When enabled,
   // the form does a second PUT to /forum/posts/:id/giveaway right after
   // the create succeeds — same fields the post-detail modal exposes.
@@ -157,6 +162,8 @@ export default function ForumNewPost() {
           imageUrls,
           publishAt: canSchedule ? publishAt : undefined,
           publishTimezone: canSchedule ? publishTz : undefined,
+          pinned: pinOnCreate ? 1 : undefined,
+          locked: lockOnCreate ? 1 : undefined,
         }),
       });
       if (!res.ok) {
@@ -352,6 +359,40 @@ export default function ForumNewPost() {
                   </div>
                 )}
               </div>
+
+              {/* Officer-only: pin / lock on create (forum #67 idea 4).
+                  Each checkbox is gated on the same permission as the
+                  post-detail toggle, so a member with only one of them
+                  sees only that one. */}
+              {(isOfficer() || hasPermission('forum.pin_posts') || hasPermission('forum.lock_posts')) && (
+                <div className={styles.composeField}>
+                  <span className={styles.composeLabel}>
+                    Post options <span className={styles.composeOptional}>(officer)</span>
+                  </span>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    {(isOfficer() || hasPermission('forum.pin_posts')) && (
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-sm)' }}>
+                        <input
+                          type="checkbox"
+                          checked={pinOnCreate}
+                          onChange={(e) => setPinOnCreate(e.target.checked)}
+                        />
+                        Pin this post
+                      </label>
+                    )}
+                    {(isOfficer() || hasPermission('forum.lock_posts')) && (
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-sm)' }}>
+                        <input
+                          type="checkbox"
+                          checked={lockOnCreate}
+                          onChange={(e) => setLockOnCreate(e.target.checked)}
+                        />
+                        Lock replies
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Officer-only: schedule the post for a future time. Leaving
                   blank publishes immediately. */}
