@@ -1113,7 +1113,7 @@ export default function ForumPost() {
               <span className={styles.forumReplyRailMeta}>
                 {post.locked
                   ? 'Locked — no new replies allowed.'
-                  : `${comments.length} ${comments.length === 1 ? 'reply' : 'replies'} so far`}
+                  : `${totalReplies} ${totalReplies === 1 ? 'reply' : 'replies'} so far`}
               </span>
             </header>
 
