@@ -119,6 +119,9 @@ require('./services/notification-stream').startHeartbeat();
 // Periodic scheduler that fires the 'event' broadcast when a scheduled
 // event's publish_at lands. Self-starts on require.
 require('./services/event-publish-scheduler');
+// Periodic scheduler that posts a "now live" Discord embed to the events
+// channel when an event's starts_at lands (rapazzini forum #65 item 3).
+require('./services/event-live-scheduler');
 app.use('/api/users', require('./routes/users'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/characters', require('./routes/characters'));

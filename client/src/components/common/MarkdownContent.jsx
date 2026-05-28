@@ -42,8 +42,13 @@ export default function MarkdownContent({ source, className }) {
     // The MentionSuggest dropdown inserts plain `@Name ` tokens — render
     // them as a gold, heading-font name (drop the @ per the design ask).
     // DOMPurify allows <span class> so this survives sanitization.
+    // Unicode-aware: \w is ASCII-only so the highlight stopped at the
+    // first accented char in names like Nêmy / Eyecandý (forum #32).
+    // [\p{L}\p{M}\p{N}_] matches Unicode letters + combining marks +
+    // numbers; the {1,30} greedy match grabs the whole name and the
+    // trailing space/punctuation ends it (no ASCII \b needed).
     const withMentions = String(source).replace(
-      /(^|[\s(])@(\w{1,30})\b/g,
+      /(^|[\s(])@([\p{L}\p{M}\p{N}_]{1,30})/gu,
       (_, lead, name) => `${lead}<span class="mdga-mention">${name}</span>`
     );
     const raw = marked.parse(withMentions);

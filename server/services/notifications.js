@@ -41,9 +41,10 @@ async function getUserPrefs(userId) {
 }
 
 // Matches @<name> tokens — must be at start-of-string OR preceded by
-// whitespace, must be followed by a word boundary. Name char class:
-// [A-Za-z0-9_] up to 30 chars (matches mention-search query cap).
-const MENTION_RE = /(?:^|\s)@(\w{1,30})\b/g;
+// whitespace. Name char class is Unicode-aware ([\p{L}\p{M}\p{N}_]) so
+// accented names like Nêmy fire notifications too — \w is ASCII-only and
+// silently dropped diacritic names from the mention parse (forum #32).
+const MENTION_RE = /(?:^|\s)@([\p{L}\p{M}\p{N}_]{1,30})/gu;
 
 // Look up users by name across the four fields the mention-search
 // endpoint exposes. Returns the first active-account match per query

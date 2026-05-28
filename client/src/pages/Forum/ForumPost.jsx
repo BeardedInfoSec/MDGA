@@ -57,7 +57,7 @@ export default function ForumPost() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isLoggedIn, isOfficer, hasPermission, user, apiFetch } = useAuth();
 
   const [allCategories, setAllCategories] = useState([]);
@@ -253,6 +253,18 @@ export default function ForumPost() {
     const target = Number.isInteger(p) && p > 0 ? p : 1;
     setCommentsPage((cur) => (cur === target ? cur : target));
   }, [searchParams]);
+
+  // Navigate comment pages via the URL (not just state) so a refresh keeps
+  // you on the same page (forum #75 item 2). Merges into existing params
+  // to preserve ?sort etc.; the effect above then syncs commentsPage.
+  function goToCommentsPage(targetPage) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (targetPage <= 1) next.delete('comments_page');
+      else next.set('comments_page', String(targetPage));
+      return next;
+    }, { replace: false });
+  }
 
   // Scroll to a specific comment when the URL hash is `#comment-NN`
   // (notification deep links use this format). Wait for the comments
@@ -605,7 +617,7 @@ export default function ForumPost() {
         // comment in context. Server clamps if our guess is off.
         const projected = (commentsPagination?.total ?? 0) + 1;
         const lastPage = Math.max(1, Math.ceil(projected / COMMENTS_PER_PAGE));
-        if (lastPage !== commentsPage) setCommentsPage(lastPage);
+        if (lastPage !== commentsPage) goToCommentsPage(lastPage);
         else loadPost();
         // Set the URL hash so the existing #comment-N effect scrolls the
         // new row into view + highlights it once it actually lands in the
@@ -647,6 +659,10 @@ export default function ForumPost() {
     return renderShell(<p className={styles.forumEmptyState}>Post not found.</p>, 'Forum post', 'Not found');
   }
 
+  // Whole-thread reply count, not just the current page (forum #75 item 1+3).
+  // Prefer the live-polled count, fall back to pagination total, then to the
+  // current page's array length as a last resort.
+  const totalReplies = liveCommentCount ?? commentsPagination?.total ?? comments.length;
   const displayName = authorDisplayName(post);
   const secondaryName = authorSecondaryName(post);
   const profileLink = authorProfileLink(post);
@@ -696,7 +712,7 @@ export default function ForumPost() {
           <span className={styles.forumEyebrow}>{post.category_name || 'Forum post'}</span>
           <h1 className={styles.forumPageTitle}>{postTitle}</h1>
           <p className={styles.forumPageSubtitle}>
-            By {displayName} · {timeAgo(post.created_at)} · {comments.length} {comments.length === 1 ? 'reply' : 'replies'}
+            By {displayName} · {timeAgo(post.created_at)} · {totalReplies} {totalReplies === 1 ? 'reply' : 'replies'}
           </p>
         </div>
       </header>
@@ -816,7 +832,7 @@ export default function ForumPost() {
               </div>
               <div className={styles.postEngagementStats}>
                 <span title="Views">{post.view_count || 0} views</span>
-                <span title="Comments">{comments.length} replies</span>
+                <span title="Comments">{totalReplies} replies</span>
                 <span title="Upvotes">{post.upvotes || 0} ▲</span>
                 <span title="Downvotes">{post.downvotes || 0} ▼</span>
               </div>
@@ -1053,7 +1069,7 @@ export default function ForumPost() {
                 <button
                   type="button"
                   disabled={commentsPage <= 1}
-                  onClick={() => setCommentsPage((p) => Math.max(1, p - 1))}
+                  onClick={() => goToCommentsPage(Math.max(1, commentsPage - 1))}
                   style={{ padding: '6px 14px', background: 'transparent', color: commentsPage <= 1 ? 'var(--color-gray-700)' : 'var(--color-text-secondary)', border: `1px solid ${commentsPage <= 1 ? 'var(--color-gray-800)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, cursor: commentsPage <= 1 ? 'not-allowed' : 'pointer' }}
                 >← Older</button>
                 {Array.from({ length: commentsPagination.pages }, (_, i) => i + 1)
@@ -1069,14 +1085,14 @@ export default function ForumPost() {
                     <button
                       key={p}
                       type="button"
-                      onClick={() => setCommentsPage(p)}
+                      onClick={() => goToCommentsPage(p)}
                       style={{ padding: '6px 12px', background: p === commentsPage ? 'rgba(212,175,55,0.18)' : 'transparent', color: p === commentsPage ? 'var(--color-gold)' : 'var(--color-text-secondary)', border: `1px solid ${p === commentsPage ? 'var(--color-gold)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
                     >{p}</button>
                   ))}
                 <button
                   type="button"
                   disabled={commentsPage >= commentsPagination.pages}
-                  onClick={() => setCommentsPage((p) => Math.min(commentsPagination.pages, p + 1))}
+                  onClick={() => goToCommentsPage(Math.min(commentsPagination.pages, commentsPage + 1))}
                   style={{ padding: '6px 14px', background: 'transparent', color: commentsPage >= commentsPagination.pages ? 'var(--color-gray-700)' : 'var(--color-text-secondary)', border: `1px solid ${commentsPage >= commentsPagination.pages ? 'var(--color-gray-800)' : 'var(--color-gray-700)'}`, borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, cursor: commentsPage >= commentsPagination.pages ? 'not-allowed' : 'pointer' }}
                 >Newer →</button>
               </div>

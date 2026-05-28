@@ -418,10 +418,17 @@ router.get('/categories/:id/posts', async (req, res) => {
       [resolvedCategoryId]
     );
 
+    // total_threads = every thread in the category (all pinned + all
+    // unpinned), distinct from pagination.total which is the unpinned-only
+    // count the pager works against. The frontend stat bar wants the full
+    // figure (forum #75 item 3).
+    const totalThreads = pinnedPosts.length + countResult[0].total;
+
     res.json({
       category: catRows[0] || null,
       posts: [...pinnedPosts, ...unpinnedPosts],
       pinned_count: pinnedPosts.length,
+      total_threads: totalThreads,
       sort,
       pagination: { page, limit, total: countResult[0].total, pages: Math.max(1, Math.ceil(countResult[0].total / limit)) },
     });

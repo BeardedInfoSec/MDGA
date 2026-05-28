@@ -39,6 +39,7 @@ export default function ForumCategory() {
   const [category, setCategory] = useState(null);
   const [posts, setPosts] = useState([]);
   const [pinnedCount, setPinnedCount] = useState(0);
+  const [totalThreads, setTotalThreads] = useState(null);
   const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState(searchParams.get('sort') || 'active');
@@ -72,6 +73,7 @@ export default function ForumCategory() {
       setCategory(data.category || null);
       setPosts(data.posts || []);
       setPinnedCount(data.pinned_count || 0);
+      setTotalThreads(data.total_threads ?? null);
       setPagination(data.pagination || null);
     } catch (err) {
       console.error('Load posts error:', err);
@@ -111,10 +113,15 @@ export default function ForumCategory() {
   const sortLabel = sortOptions.find((o) => o.key === sort)?.label || 'Latest';
 
   // Title band stats per-category
+  // Both figures use total_threads (whole category, pinned + unpinned) not
+  // the current page's array or the unpinned-only pagination.total (forum #75
+  // item 3). category.post_count isn't returned by this endpoint, so the
+  // old `category?.post_count ?? posts.length` collapsed to a per-page count.
+  const threadTotalDisplay = totalThreads != null ? String(totalThreads) : (pagination?.total != null ? String(pagination.total) : '—');
   const stats = [
-    { value: String(category?.post_count ?? posts.length), label: 'Posts' },
+    { value: threadTotalDisplay, label: 'Posts' },
     { value: category?.officer_only ? 'Officer-only' : 'Public', label: 'Visibility' },
-    { value: pagination?.total != null ? String(pagination.total) : '—', label: 'Total threads' },
+    { value: threadTotalDisplay, label: 'Total threads' },
     { value: sortLabel, label: 'Sorted by' },
   ];
 

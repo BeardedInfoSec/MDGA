@@ -293,26 +293,32 @@ export default function Home() {
 
             {!dashboardLoading && !dashboardError && dashboard && (
               <>
+                {/* Heading clarifies these are the logged-in member's own
+                    figures, not guild-wide or cumulative totals (forum #77). */}
+                <h3 className={styles.dashSectionTitle}>Your Stats</h3>
+                <p className={styles.dashSectionCaption}>
+                  Your personal activity and your best rating across your linked characters — not guild-wide totals.
+                </p>
                 <div className={styles.dashStats}>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{stats?.posts ?? 0}</span>
-                    <span className={styles.dashStatLabel}>Forum Posts</span>
+                    <span className={styles.dashStatLabel}>Your Forum Posts</span>
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{stats?.comments ?? 0}</span>
-                    <span className={styles.dashStatLabel}>Replies</span>
+                    <span className={styles.dashStatLabel}>Your Replies</span>
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{stats?.characters ?? 0}</span>
-                    <span className={styles.dashStatLabel}>Characters</span>
+                    <span className={styles.dashStatLabel}>Your Characters</span>
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{topRating}</span>
-                    <span className={styles.dashStatLabel}>Top PvP Rating</span>
+                    <span className={styles.dashStatLabel} title="Your highest rating across 2v2, 3v3, Solo Shuffle, and RBG">Your Best PvP Rating</span>
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{mythicPlusRating}</span>
-                    <span className={styles.dashStatLabel}>M+ Rating</span>
+                    <span className={styles.dashStatLabel}>Your M+ Rating</span>
                   </div>
                 </div>
 

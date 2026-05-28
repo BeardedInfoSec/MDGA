@@ -15,7 +15,10 @@ import styles from './MentionSuggest.module.css';
 // dropdown is document-relative (no ancestor position/transform context
 // to fight with), z-index 50 sits cleanly above the page chrome.
 
-const TRIGGER_RE = /(?:^|\s)@(\w{1,30})$/;
+// Unicode-aware name class so accented names (Nêmy, Eyecandý) trigger the
+// dropdown and match fully (forum #32). \w would stop at the first
+// non-ASCII char.
+const TRIGGER_RE = /(?:^|\s)@([\p{L}\p{M}\p{N}_]{1,30})$/u;
 const DEBUG = typeof window !== 'undefined' && /[?&]debug=mention/.test(window.location.search);
 function dbg(...args) { if (DEBUG) console.log('[MentionSuggest]', ...args); }
 
