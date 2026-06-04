@@ -131,6 +131,9 @@ export default function Nav() {
                     {isGuildMaster() ? 'Admin Panel' : 'Officer Panel'}
                   </Link>
                 )}
+                {isOfficer() && (
+                  <Link to="/wow-addon" className={styles.dropdownItem}>WoW Addon</Link>
+                )}
                 <button className={styles.dropdownItem} onClick={logout}>Logout</button>
               </div>
             </li>

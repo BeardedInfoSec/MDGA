@@ -747,6 +747,93 @@ router.put('/:id/main', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/characters/:id/specs — owner-editable main + off spec.
+// Migration 072 added user_main_spec / user_off_spec columns; the Blizzard
+// sync writes to `spec` (the active spec at last refresh) and never touches
+// these, so a member's declared main/off survives every API refresh.
+// Body: { mainSpec: <Spec> | null, offSpec: <Spec> | null }
+// Specs must be valid for the character's class. Pass null to clear.
+const CLASS_SPECS_SERVER = {
+  'Death Knight': ['Blood', 'Frost', 'Unholy'],
+  'Demon Hunter': ['Devourer', 'Havoc', 'Vengeance'],
+  'Druid': ['Balance', 'Feral', 'Guardian', 'Restoration'],
+  'Evoker': ['Augmentation', 'Devastation', 'Preservation'],
+  'Hunter': ['Beast Mastery', 'Marksmanship', 'Survival'],
+  'Mage': ['Arcane', 'Fire', 'Frost'],
+  'Monk': ['Brewmaster', 'Mistweaver', 'Windwalker'],
+  'Paladin': ['Holy', 'Protection', 'Retribution'],
+  'Priest': ['Discipline', 'Holy', 'Shadow'],
+  'Rogue': ['Assassination', 'Outlaw', 'Subtlety'],
+  'Shaman': ['Elemental', 'Enhancement', 'Restoration'],
+  'Warlock': ['Affliction', 'Demonology', 'Destruction'],
+  'Warrior': ['Arms', 'Fury', 'Protection'],
+};
+router.patch('/:id/specs', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid character id' });
+
+    const [rows] = await pool.execute(
+      'SELECT user_id, class FROM user_characters WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Character not found' });
+    if (Number(rows[0].user_id) !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'Not your character' });
+    }
+
+    const charClass = rows[0].class;
+    const validList = CLASS_SPECS_SERVER[charClass] || null;
+    const mainSpecRaw = req.body && Object.prototype.hasOwnProperty.call(req.body, 'mainSpec') ? req.body.mainSpec : undefined;
+    const offSpecRaw  = req.body && Object.prototype.hasOwnProperty.call(req.body, 'offSpec')  ? req.body.offSpec  : undefined;
+
+    function normalize(spec) {
+      if (spec === null || spec === '') return null;
+      if (typeof spec !== 'string') return undefined; // signal invalid
+      const trimmed = spec.trim();
+      if (!trimmed) return null;
+      if (!validList || !validList.includes(trimmed)) return undefined;
+      return trimmed;
+    }
+
+    const sets = [];
+    const params = [];
+    if (mainSpecRaw !== undefined) {
+      const v = normalize(mainSpecRaw);
+      if (v === undefined) {
+        return res.status(400).json({ error: `Invalid main spec for ${charClass}` });
+      }
+      sets.push('user_main_spec = ?');
+      params.push(v);
+    }
+    if (offSpecRaw !== undefined) {
+      const v = normalize(offSpecRaw);
+      if (v === undefined) {
+        return res.status(400).json({ error: `Invalid off spec for ${charClass}` });
+      }
+      sets.push('user_off_spec = ?');
+      params.push(v);
+    }
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'Nothing to update — pass mainSpec and/or offSpec' });
+    }
+
+    params.push(id);
+    await pool.execute(
+      `UPDATE user_characters SET ${sets.join(', ')} WHERE id = ?`,
+      params
+    );
+    const [updated] = await pool.execute(
+      'SELECT id, character_name, class, spec, user_main_spec, user_off_spec FROM user_characters WHERE id = ?',
+      [id]
+    );
+    res.json({ character: updated[0] });
+  } catch (err) {
+    console.error('Set specs error:', err);
+    res.status(500).json({ error: 'Failed to update specs' });
+  }
+});
+
 // DELETE /api/characters/:id
 router.delete('/:id', requireAuth, async (req, res) => {
   try {

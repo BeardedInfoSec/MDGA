@@ -1,0 +1,128 @@
+.page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6);
+  font-family: var(--font-ui);
+}
+
+.header {
+  margin-bottom: var(--space-8);
+}
+
+.eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-3xl, 2.25rem);
+  color: var(--color-gold);
+  letter-spacing: 1px;
+  margin: 0 0 var(--space-3);
+}
+
+.subtitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.subtitle strong { color: var(--color-text-primary); }
+
+.card {
+  padding: var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--space-5);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  gap: var(--space-3);
+}
+
+.cardTitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  color: var(--color-gold);
+  letter-spacing: 0.5px;
+}
+
+.cardMeta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.downloadRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-black, #0a0a0a);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+}
+
+.downloadInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.downloadName {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.downloadHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.steps {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.steps li {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.55;
+}
+
+.steps code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  padding: 1px 6px;
+  background: var(--color-black);
+  border: 1px solid var(--color-gray-700);
+  border-radius: 3px;
+  color: var(--color-gold);
+}
+
+.bodyText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-3);
+}
+
+.bodyText:last-child { margin-bottom: 0; }

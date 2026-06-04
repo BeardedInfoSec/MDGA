@@ -4,24 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import styles from './Join.module.css';
 
-// Class -> specs map (forum #79). Source of truth for the multi-spec
-// checkbox UI. Display labels are the spec name; the composed value
-// sent to the server is `<Class> - <Spec1>, <Spec2>`.
-const CLASS_SPECS = {
-  'Death Knight': ['Blood', 'Frost', 'Unholy'],
-  'Demon Hunter': ['Devourer', 'Havoc', 'Vengeance'],
-  'Druid': ['Balance', 'Feral', 'Guardian', 'Restoration'],
-  'Evoker': ['Augmentation', 'Devastation', 'Preservation'],
-  'Hunter': ['Beast Mastery', 'Marksmanship', 'Survival'],
-  'Mage': ['Arcane', 'Fire', 'Frost'],
-  'Monk': ['Brewmaster', 'Mistweaver', 'Windwalker'],
-  'Paladin': ['Holy', 'Protection', 'Retribution'],
-  'Priest': ['Discipline', 'Holy', 'Shadow'],
-  'Rogue': ['Assassination', 'Outlaw', 'Subtlety'],
-  'Shaman': ['Elemental', 'Enhancement', 'Restoration'],
-  'Warlock': ['Affliction', 'Demonology', 'Destruction'],
-  'Warrior': ['Arms', 'Fury', 'Protection'],
-};
+import { CLASS_SPECS } from '../../data/wowClassSpecs';
 
 const DISCORD_SVG = (
   <svg className={styles.discordIcon} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">

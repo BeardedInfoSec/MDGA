@@ -17,6 +17,7 @@ import Leaderboards from './pages/Leaderboards/Leaderboards';
 import Profile from './pages/Profile/Profile';
 import Admin from './pages/Admin/Admin';
 import OfficerToolkitAuth from './pages/OfficerToolkit/OfficerToolkitAuth';
+import WowAddon from './pages/WowAddon/WowAddon';
 
 export default function App() {
   return (
@@ -44,6 +45,12 @@ export default function App() {
             auth handoff). Officer-only gate is enforced inside the
             page itself + the server endpoint. */}
         <Route path="/officer-toolkit/auth" element={<ProtectedRoute><OfficerToolkitAuth /></ProtectedRoute>} />
+
+        {/* WoW addon download page (forum #72). Officer-gated link in the
+            user dropdown; page redirects non-officers via its own check
+            as well. The /wow_addon/* static mount serves the zip file
+            and is intentionally NOT auth-gated. */}
+        <Route path="/wow-addon" element={<ProtectedRoute requireOfficer><WowAddon /></ProtectedRoute>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -8,8 +8,8 @@ import { primaryName, secondaryName } from '../../utils/userDisplay';
 import GuildFlag from '../../components/common/GuildFlag';
 import NotificationPrefs from '../../components/common/NotificationPrefs';
 import AFKNotice from '../../components/common/AFKNotice';
-import WoWAddonCard from '../../components/common/WoWAddonCard';
 import settingsStyles from '../../components/common/NotificationPrefs.module.css';
+import { CLASS_SPECS } from '../../data/wowClassSpecs';
 import styles from './Profile.module.css';
 
 const WOW_CLASS_COLORS = {
@@ -53,6 +53,12 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [flippedCardId, setFlippedCardId] = useState(null);
+  // Inline spec-edit state — which character's spec form is open + drafts
+  // for the two dropdowns. Save calls PATCH /api/characters/:id/specs.
+  const [editingSpecsId, setEditingSpecsId] = useState(null);
+  const [draftMainSpec, setDraftMainSpec] = useState('');
+  const [draftOffSpec, setDraftOffSpec] = useState('');
+  const [savingSpecs, setSavingSpecs] = useState(false);
 
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [overlayName, setOverlayName] = useState('');
@@ -426,6 +432,42 @@ export default function Profile() {
     }
   };
 
+  // Open the inline spec editor for a given character, seeded with the
+  // current values. Falls back to Blizzard's last-active spec if the
+  // member hasn't set a main override yet.
+  const openSpecEditor = (char) => {
+    setEditingSpecsId(char.id);
+    setDraftMainSpec(char.user_main_spec || char.spec || '');
+    setDraftOffSpec(char.user_off_spec || '');
+  };
+
+  const closeSpecEditor = () => {
+    setEditingSpecsId(null);
+    setDraftMainSpec('');
+    setDraftOffSpec('');
+  };
+
+  const saveSpecs = async (charId) => {
+    setSavingSpecs(true);
+    try {
+      const res = await apiFetch(`/characters/${charId}/specs`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          mainSpec: draftMainSpec || null,
+          offSpec: draftOffSpec || null,
+        }),
+      });
+      if (res.ok) {
+        closeSpecEditor();
+        await loadProfile();
+      }
+    } catch {
+      // no-op
+    } finally {
+      setSavingSpecs(false);
+    }
+  };
+
   const refreshPvpStats = async () => {
     setRefreshing(true);
     try {
@@ -596,7 +638,12 @@ export default function Profile() {
             <div className={styles.charactersGrid}>
               {characters.map((char) => {
                 const accent = WOW_CLASS_COLORS[char.class] || '#D4A017';
-                const classSpec = [char.class, char.spec].filter(Boolean).join(' - ');
+                // Prefer the user-set main spec over Blizzard's last-active
+                // spec — migration 072 added these so a sync can't wipe
+                // member-curated values. If neither is set, fall back to
+                // Blizzard's `spec` (which is what we used to show).
+                const effectiveMain = char.user_main_spec || char.spec;
+                const classSpec = [char.class, effectiveMain].filter(Boolean).join(' - ');
                 const quickPills = [];
                 if (toNum(char.solo_shuffle) > 0) {
                   quickPills.push(
@@ -698,7 +745,67 @@ export default function Profile() {
                           {char.guild_name && <span className={styles.charGuild}> &lt;{char.guild_name}&gt;</span>}
                         </div>
                         {classSpec && <div className={styles.charClass}>{classSpec}</div>}
+                        {char.user_off_spec && (
+                          <div className={styles.charClass} style={{ opacity: 0.75, fontSize: '0.85em' }}>
+                            Off-spec: {char.user_off_spec}
+                          </div>
+                        )}
                         {details.length > 0 && <div className={styles.charDetails}>{details.join(' - ')}</div>}
+
+                        {isOwnProfile && editingSpecsId === char.id && (
+                          <div
+                            data-no-flip="true"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3)', background: 'var(--color-black, #0a0a0a)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}
+                          >
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span style={{ fontSize: 'var(--font-size-xs)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)' }}>Main spec</span>
+                              <select
+                                value={draftMainSpec}
+                                onChange={(e) => setDraftMainSpec(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ padding: '6px 8px', background: 'var(--color-gray-900)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)' }}
+                              >
+                                <option value="">— none —</option>
+                                {(CLASS_SPECS[char.class] || []).map((s) => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span style={{ fontSize: 'var(--font-size-xs)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)' }}>Off spec (optional)</span>
+                              <select
+                                value={draftOffSpec}
+                                onChange={(e) => setDraftOffSpec(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ padding: '6px 8px', background: 'var(--color-gray-900)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)' }}
+                              >
+                                <option value="">— none —</option>
+                                {(CLASS_SPECS[char.class] || []).filter((s) => s !== draftMainSpec).map((s) => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--sm"
+                                onClick={(e) => { e.stopPropagation(); closeSpecEditor(); }}
+                                disabled={savingSpecs}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--sm"
+                                onClick={(e) => { e.stopPropagation(); saveSpecs(char.id); }}
+                                disabled={savingSpecs}
+                              >
+                                {savingSpecs ? 'Saving…' : 'Save specs'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         <div className={`${styles.charPvp} ${quickPills.length === 0 ? styles.charPvpEmpty : ''}`}>
                           {quickPills.length > 0 ? quickPills : (
@@ -732,6 +839,18 @@ export default function Profile() {
                                   Set Main
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                className={`btn btn--secondary btn--sm ${styles.charActionBtn}`}
+                                data-no-flip="true"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (editingSpecsId === char.id) closeSpecEditor();
+                                  else openSpecEditor(char);
+                                }}
+                              >
+                                {editingSpecsId === char.id ? 'Close' : 'Edit Specs'}
+                              </button>
                               <button
                                 type="button"
                                 className={`btn btn--danger btn--sm ${styles.charActionBtn}`}
@@ -873,10 +992,6 @@ export default function Profile() {
               initialReason={profile?.user?.afk_reason || ''}
             />
             <NotificationPrefs />
-            {/* WoW addon download is officer-and-above only — most members
-                don't need to grab the addon directly (it's the officer audit
-                workflow piece). Members who do can ask any officer. */}
-            {isOfficer() && <WoWAddonCard />}
           </div>
         )}
 
