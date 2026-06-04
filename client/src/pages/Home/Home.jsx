@@ -136,6 +136,8 @@ export default function Home() {
         stats.mainCharacter.arena_3v3 || 0,
         stats.mainCharacter.arena_2v2 || 0,
         stats.mainCharacter.rbg_rating || 0,
+        // BG Blitz now captured (forum #77).
+        stats.mainCharacter.blitz_rating || 0,
       )
     : 0;
   const mythicPlusRating = stats?.mainCharacter?.mythic_plus_rating || 0;
@@ -314,7 +316,7 @@ export default function Home() {
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{topRating}</span>
-                    <span className={styles.dashStatLabel} title="Your highest rating across 2v2, 3v3, Solo Shuffle, and RBG">Your Best PvP Rating</span>
+                    <span className={styles.dashStatLabel} title="Your highest rating across 2v2, 3v3, Solo Shuffle, RBG, and BG Blitz">Your Best PvP Rating</span>
                   </div>
                   <div className={styles.dashStat}>
                     <span className={styles.dashStatValue}>{mythicPlusRating}</span>

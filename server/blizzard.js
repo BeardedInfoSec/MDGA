@@ -110,6 +110,8 @@ async function scrapeArmoryProfile(realmSlug, characterName) {
       arena_3v3: r['3v3']?.rating || 0,
       solo_shuffle: r.shuffle?.rating || 0,
       rbg_rating: r.battlegrounds?.rating || 0,
+      // Battleground Blitz (forum #77). Scrape source uses `blitz` key.
+      blitz_rating: r.blitz?.rating || 0,
       honorable_kills: c.pvp.honorableKills?.value || 0,
     } : null;
 
@@ -239,6 +241,8 @@ async function fetchPvpStats(realmSlug, characterName) {
     arena_3v3: 0,
     solo_shuffle: 0,
     rbg_rating: 0,
+    // Battleground Blitz — separate ranked bracket from RBG (forum #77).
+    blitz_rating: 0,
     honorable_kills: data.honorable_kills || 0,
   };
 
@@ -252,7 +256,12 @@ async function fetchPvpStats(realmSlug, characterName) {
         const bd = await bracketRes.json();
         const rating = bd.rating || 0;
 
-        if (href.includes('shuffle') && rating > stats.solo_shuffle) stats.solo_shuffle = rating;
+        // Blitz first — its href happens to also contain "solo" in some
+        // forms (solo-blitz), so the shuffle branch could swallow it if
+        // the order were flipped. Take max in case Blizzard ever exposes
+        // multiple Blitz brackets per character.
+        if (href.includes('blitz') && rating > stats.blitz_rating) stats.blitz_rating = rating;
+        else if (href.includes('shuffle') && rating > stats.solo_shuffle) stats.solo_shuffle = rating;
         else if (href.includes('3v3')) stats.arena_3v3 = rating;
         else if (href.includes('2v2')) stats.arena_2v2 = rating;
         else if (href.includes('rbg')) stats.rbg_rating = rating;

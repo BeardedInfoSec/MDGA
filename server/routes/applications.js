@@ -3,8 +3,17 @@ const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { sendApprovalEmail } = require('../services/email');
 const { sendApplicationAlert, sendApplicationApprovedDM } = require('../bot');
+const { fetchCharacterProfile, scrapeArmoryProfile } = require('../blizzard');
 
 const router = express.Router();
+
+// Slugify a realm name the way Blizzard does: lowercase, spaces+apostrophes
+// → hyphens, drop anything else (forum #79 armory validation).
+function slugifyRealm(name) {
+  return String(name || '').trim().toLowerCase()
+    .replace(/[' ]/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+}
 
 // POST /api/applications
 router.post('/', async (req, res) => {
@@ -13,6 +22,28 @@ router.post('/', async (req, res) => {
 
     if (!characterName || !server || !classSpec || !discord) {
       return res.status(400).json({ error: 'Required fields: characterName, server, classSpec, discord' });
+    }
+
+    // Armory validation (forum #79). Verify the character actually exists
+    // before recording the application. Fall through to the scraper if
+    // the API 404s — some players have the "Community Sites and Apps"
+    // privacy opt-out enabled, which makes the API 404 but the web
+    // armory still renders. Both null = it really doesn't exist.
+    // See [[project-blizzard-privacy-optout]] in the project memory.
+    const realmSlug = slugifyRealm(server);
+    const cleanName = String(characterName).trim();
+    if (realmSlug && cleanName) {
+      let found = null;
+      try { found = await fetchCharacterProfile(realmSlug, cleanName); } catch { /* fall through */ }
+      if (!found) {
+        try { found = await scrapeArmoryProfile(realmSlug, cleanName); } catch { /* fall through */ }
+      }
+      if (!found) {
+        return res.status(400).json({
+          code: 'CHARACTER_NOT_FOUND',
+          error: `We couldn’t find "${cleanName}" on ${server} via the Blizzard armory. Double-check the spelling and server, then try again.`,
+        });
+      }
     }
 
     const [result] = await pool.execute(

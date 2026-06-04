@@ -624,6 +624,13 @@ export default function Profile() {
                     </span>
                   );
                 }
+                if (toNum(char.blitz_rating) > 0) {
+                  quickPills.push(
+                    <span key="blitz" className={styles.charPvpItem}>
+                      <strong>{formatNumber(char.blitz_rating)}</strong> Blitz
+                    </span>
+                  );
+                }
                 if (toNum(char.honorable_kills) > 0) {
                   quickPills.push(
                     <span key="hk" className={styles.charPvpItem}>
@@ -759,6 +766,7 @@ export default function Profile() {
                               <div className={styles.charStat}><span className={styles.charStatLabel}>3v3</span><span className={styles.charStatValue}>{formatNumber(char.arena_3v3)}</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>2v2</span><span className={styles.charStatValue}>{formatNumber(char.arena_2v2)}</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>RBG</span><span className={styles.charStatValue}>{formatNumber(char.rbg_rating)}</span></div>
+                              <div className={styles.charStat}><span className={styles.charStatLabel}>BG Blitz</span><span className={styles.charStatValue}>{formatNumber(char.blitz_rating)}</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Arena Record</span><span className={styles.charStatValue}>{formatNumber(arenaWon)}-{formatNumber(arenaLost)} ({arenaWinRate})</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>BG Record</span><span className={styles.charStatValue}>{formatNumber(bgWon)}-{formatNumber(bgLost)} ({bgWinRate})</span></div>
                               <div className={styles.charStat}><span className={styles.charStatLabel}>Honorable Kills</span><span className={styles.charStatValue}>{formatNumber(char.honorable_kills)}</span></div>
@@ -864,6 +872,22 @@ export default function Profile() {
         )}
 
         {isOwnProfile && <NotificationPrefs />}
+
+        {isOwnProfile && (
+          <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-black-soft)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-md)' }}>
+            <h3 style={{ margin: '0 0 var(--space-1)', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-lg)', color: 'var(--color-gold)' }}>WoW Addon</h3>
+            <p style={{ margin: '0 0 var(--space-3)', fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+              The in-game MDGA addon adds a "Generate Report" button and powers the officer audit tooling. Install it in your AddOns folder like any other WoW addon.
+            </p>
+            <a
+              href="/wow_addon/MDGA.zip"
+              download
+              className="btn btn--secondary btn--sm"
+            >
+              Download MDGA addon
+            </a>
+          </div>
+        )}
 
       </div>{/* /.body */}
 

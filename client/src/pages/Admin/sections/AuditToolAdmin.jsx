@@ -79,6 +79,15 @@ export default function AuditToolAdmin({ apiFetch, showToast }) {
           <Download size={14} aria-hidden="true" />
           <span>Download audit tool</span>
         </a>
+        <a
+          href="/wow_addon/MDGA.zip"
+          download
+          className="btn btn--secondary btn--sm"
+          title="In-game MDGA WoW addon (the one the audit tool reads roster reports from)"
+        >
+          <Download size={14} aria-hidden="true" />
+          <span>Download MDGA addon</span>
+        </a>
       </div>
 
       {error && (

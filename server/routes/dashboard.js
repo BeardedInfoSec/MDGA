@@ -89,7 +89,7 @@ router.get('/', requireAuth, async (req, res) => {
     // Get main character ratings for dashboard stat cards
     const [mainChar] = await pool.execute(`
       SELECT uc.character_name, uc.realm, uc.class, uc.spec,
-             ps.solo_shuffle, ps.arena_3v3, ps.arena_2v2, ps.rbg_rating, ps.mythic_plus_rating
+             ps.solo_shuffle, ps.arena_3v3, ps.arena_2v2, ps.rbg_rating, ps.blitz_rating, ps.mythic_plus_rating
       FROM user_characters uc
       LEFT JOIN pvp_stats ps ON ps.character_id = uc.id
       WHERE uc.user_id = ? AND uc.is_main = TRUE

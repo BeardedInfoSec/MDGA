@@ -41,7 +41,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     if (users.length === 0) return res.status(404).json({ error: 'User not found' });
 
     const [characters] = await pool.execute(
-      `SELECT uc.*, ps.arena_2v2, ps.arena_3v3, ps.solo_shuffle, ps.rbg_rating, ps.honorable_kills,
+      `SELECT uc.*, ps.arena_2v2, ps.arena_3v3, ps.solo_shuffle, ps.rbg_rating, ps.blitz_rating, ps.honorable_kills,
              ps.killing_blows, ps.arenas_played, ps.arenas_won, ps.arenas_lost,
              ps.bgs_played, ps.bgs_won,
              ps.total_deaths, ps.creatures_killed, ps.dungeons_entered, ps.raids_entered,

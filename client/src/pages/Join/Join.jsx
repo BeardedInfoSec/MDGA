@@ -4,6 +4,25 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import styles from './Join.module.css';
 
+// Class -> specs map (forum #79). Source of truth for the multi-spec
+// checkbox UI. Display labels are the spec name; the composed value
+// sent to the server is `<Class> - <Spec1>, <Spec2>`.
+const CLASS_SPECS = {
+  'Death Knight': ['Blood', 'Frost', 'Unholy'],
+  'Demon Hunter': ['Devourer', 'Havoc', 'Vengeance'],
+  'Druid': ['Balance', 'Feral', 'Guardian', 'Restoration'],
+  'Evoker': ['Augmentation', 'Devastation', 'Preservation'],
+  'Hunter': ['Beast Mastery', 'Marksmanship', 'Survival'],
+  'Mage': ['Arcane', 'Fire', 'Frost'],
+  'Monk': ['Brewmaster', 'Mistweaver', 'Windwalker'],
+  'Paladin': ['Holy', 'Protection', 'Retribution'],
+  'Priest': ['Discipline', 'Holy', 'Shadow'],
+  'Rogue': ['Assassination', 'Outlaw', 'Subtlety'],
+  'Shaman': ['Elemental', 'Enhancement', 'Restoration'],
+  'Warlock': ['Affliction', 'Demonology', 'Destruction'],
+  'Warrior': ['Arms', 'Fury', 'Protection'],
+};
+
 const DISCORD_SVG = (
   <svg className={styles.discordIcon} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
     <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" fill="currentColor"/>
@@ -40,7 +59,12 @@ export default function Join() {
 
   const [characterName, setCharacterName] = useState('');
   const [server, setServer] = useState('');
-  const [classSpec, setClassSpec] = useState('');
+  // Multi-spec support (forum #79). Class is a single choice; specs is an
+  // array (a player may play multiple specs on one character). The
+  // backend still accepts a single `classSpec` text field, which we
+  // compose on submit as `<Class> - <Spec1>, <Spec2>`.
+  const [mainClass, setMainClass] = useState('');
+  const [selectedSpecs, setSelectedSpecs] = useState([]);
   const [experience, setExperience] = useState('');
   const [whyJoin, setWhyJoin] = useState('');
   const [realmList, setRealmList] = useState([]);
@@ -117,7 +141,7 @@ export default function Join() {
     const errors = {};
     if (!characterName.trim()) errors.characterName = true;
     if (!server) errors.server = true;
-    if (!classSpec) errors.classSpec = true;
+    if (!mainClass || selectedSpecs.length === 0) errors.classSpec = true;
 
     if (Object.keys(errors).length) {
       setFieldErrors(errors);
@@ -125,6 +149,10 @@ export default function Join() {
     }
     setFieldErrors({});
     setSubmitting(true);
+
+    // Compose the single classSpec string the backend stores:
+    //   "<Class> - <Spec1>, <Spec2>"
+    const classSpec = `${mainClass} - ${selectedSpecs.join(', ')}`;
 
     try {
       // Submit application to server first so character/realm data is available
@@ -141,14 +169,27 @@ export default function Join() {
           whyJoin: whyJoin.trim(),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // Armory-validation failure (forum #79) surfaces as a clear field
+        // error, not a generic catch-all, so the applicant knows to fix
+        // the character/server combo specifically.
+        setSubmitting(false);
+        if (data.code === 'CHARACTER_NOT_FOUND') {
+          setFieldErrors({ characterName: true });
+          setGlobalError(data.error || 'We couldn’t find that character on the Blizzard armory. Double-check the name and server, then try again.');
+        } else {
+          setGlobalError(data.error || 'Failed to submit application. Please try again.');
+        }
+        return;
+      }
       // Pass appId so the Discord callback can link character/realm to the user
       window.location.href = `/api/auth/discord?from=join&appId=${data.id}`;
     } catch {
       setSubmitting(false);
       setGlobalError('Failed to submit application. Please try again.');
     }
-  }, [characterName, server, classSpec, experience, whyJoin]);
+  }, [characterName, server, mainClass, selectedSpecs, experience, whyJoin]);
 
   const rules = [
     { q: 'No Drama / Rage Baiting', a: 'No drama or rage baiting guildies on Discord or in-game.' },
@@ -326,83 +367,45 @@ export default function Join() {
               </div>
 
               <div className={`${styles.formGroup} ${fieldErrors.classSpec ? styles.formGroupError : ''}`}>
-                <label className={styles.formLabel} htmlFor="class-spec">Class &amp; Spec</label>
+                <label className={styles.formLabel} htmlFor="main-class">Class</label>
                 <select
                   className={styles.formSelect}
-                  id="class-spec"
-                  value={classSpec}
-                  onChange={(e) => setClassSpec(e.target.value)}
+                  id="main-class"
+                  value={mainClass}
+                  onChange={(e) => { setMainClass(e.target.value); setSelectedSpecs([]); }}
                   required
                 >
-                  <option value="">Select your class &amp; spec</option>
-                  <optgroup label="Death Knight">
-                    <option value="Blood Death Knight">Blood</option>
-                    <option value="Frost Death Knight">Frost</option>
-                    <option value="Unholy Death Knight">Unholy</option>
-                  </optgroup>
-                  <optgroup label="Demon Hunter">
-                    <option value="Devourer Demon Hunter">Devourer</option>
-                    <option value="Havoc Demon Hunter">Havoc</option>
-                    <option value="Vengeance Demon Hunter">Vengeance</option>
-                  </optgroup>
-                  <optgroup label="Druid">
-                    <option value="Balance Druid">Balance</option>
-                    <option value="Feral Druid">Feral</option>
-                    <option value="Guardian Druid">Guardian</option>
-                    <option value="Restoration Druid">Restoration</option>
-                  </optgroup>
-                  <optgroup label="Evoker">
-                    <option value="Augmentation Evoker">Augmentation</option>
-                    <option value="Devastation Evoker">Devastation</option>
-                    <option value="Preservation Evoker">Preservation</option>
-                  </optgroup>
-                  <optgroup label="Hunter">
-                    <option value="Beast Mastery Hunter">Beast Mastery</option>
-                    <option value="Marksmanship Hunter">Marksmanship</option>
-                    <option value="Survival Hunter">Survival</option>
-                  </optgroup>
-                  <optgroup label="Mage">
-                    <option value="Arcane Mage">Arcane</option>
-                    <option value="Fire Mage">Fire</option>
-                    <option value="Frost Mage">Frost</option>
-                  </optgroup>
-                  <optgroup label="Monk">
-                    <option value="Brewmaster Monk">Brewmaster</option>
-                    <option value="Mistweaver Monk">Mistweaver</option>
-                    <option value="Windwalker Monk">Windwalker</option>
-                  </optgroup>
-                  <optgroup label="Paladin">
-                    <option value="Holy Paladin">Holy</option>
-                    <option value="Protection Paladin">Protection</option>
-                    <option value="Retribution Paladin">Retribution</option>
-                  </optgroup>
-                  <optgroup label="Priest">
-                    <option value="Discipline Priest">Discipline</option>
-                    <option value="Holy Priest">Holy</option>
-                    <option value="Shadow Priest">Shadow</option>
-                  </optgroup>
-                  <optgroup label="Rogue">
-                    <option value="Assassination Rogue">Assassination</option>
-                    <option value="Outlaw Rogue">Outlaw</option>
-                    <option value="Subtlety Rogue">Subtlety</option>
-                  </optgroup>
-                  <optgroup label="Shaman">
-                    <option value="Elemental Shaman">Elemental</option>
-                    <option value="Enhancement Shaman">Enhancement</option>
-                    <option value="Restoration Shaman">Restoration</option>
-                  </optgroup>
-                  <optgroup label="Warlock">
-                    <option value="Affliction Warlock">Affliction</option>
-                    <option value="Demonology Warlock">Demonology</option>
-                    <option value="Destruction Warlock">Destruction</option>
-                  </optgroup>
-                  <optgroup label="Warrior">
-                    <option value="Arms Warrior">Arms</option>
-                    <option value="Fury Warrior">Fury</option>
-                    <option value="Protection Warrior">Protection</option>
-                  </optgroup>
+                  <option value="">Select your class</option>
+                  {Object.keys(CLASS_SPECS).map((cls) => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
                 </select>
-                <span className={styles.formError}>Class &amp; Spec is required</span>
+                {mainClass && (
+                  <div style={{ marginTop: 12 }}>
+                    <span style={{ display: 'block', fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-xs)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
+                      Specs you play (pick one or more)
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+                      {CLASS_SPECS[mainClass].map((spec) => {
+                        const checked = selectedSpecs.includes(spec);
+                        return (
+                          <label key={spec} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-sm)', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedSpecs((prev) => [...prev, spec]);
+                                else setSelectedSpecs((prev) => prev.filter((s) => s !== spec));
+                              }}
+                            />
+                            {spec}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <span className={styles.formError}>Class &amp; at least one spec required</span>
               </div>
 
               <hr className={styles.sectionDivider} />

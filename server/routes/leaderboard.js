@@ -7,7 +7,7 @@ const { syncAllGuildStats } = require('../services/guild-stats-sync');
 const router = express.Router();
 
 const VALID_BRACKETS = [
-  'solo_shuffle', 'arena_3v3', 'arena_2v2', 'rbg_rating',
+  'solo_shuffle', 'arena_3v3', 'arena_2v2', 'rbg_rating', 'blitz_rating',
   'honorable_kills', 'killing_blows',
   'arenas_played', 'arenas_won',
   'bgs_played', 'bgs_won',
@@ -118,7 +118,7 @@ router.get('/', optionalAuth, async (req, res) => {
          SELECT gm.id, gm.character_name, gm.realm_slug, gm.class, gm.race, gm.level,
                gm.guild_rank, gm.spec,
                gm.guild_id, g.faction AS guild_faction,
-               gms.arena_2v2, gms.arena_3v3, gms.solo_shuffle, gms.rbg_rating,
+               gms.arena_2v2, gms.arena_3v3, gms.solo_shuffle, gms.rbg_rating, gms.blitz_rating,
                gms.honorable_kills, gms.killing_blows,
                gms.arenas_played, gms.arenas_won, gms.arenas_lost,
                gms.bgs_played, gms.bgs_won,

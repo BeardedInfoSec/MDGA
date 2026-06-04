@@ -455,7 +455,8 @@ router.get('/users', requireAuth, requirePermission('admin.view_panel'), async (
                  COALESCE(ps.solo_shuffle, 0),
                  COALESCE(ps.arena_3v3, 0),
                  COALESCE(ps.arena_2v2, 0),
-                 COALESCE(ps.rbg_rating, 0)
+                 COALESCE(ps.rbg_rating, 0),
+                 COALESCE(ps.blitz_rating, 0)
                )) AS top_rating
         FROM user_characters uc
         LEFT JOIN pvp_stats ps ON ps.character_id = uc.id
@@ -535,11 +536,13 @@ router.get('/users', requireAuth, requirePermission('admin.view_panel'), async (
             COALESCE(ps.arena_3v3, 0) AS arena_3v3,
             COALESCE(ps.arena_2v2, 0) AS arena_2v2,
             COALESCE(ps.rbg_rating, 0) AS rbg_rating,
+            COALESCE(ps.blitz_rating, 0) AS blitz_rating,
             GREATEST(
               COALESCE(ps.solo_shuffle, 0),
               COALESCE(ps.arena_3v3, 0),
               COALESCE(ps.arena_2v2, 0),
-              COALESCE(ps.rbg_rating, 0)
+              COALESCE(ps.rbg_rating, 0),
+              COALESCE(ps.blitz_rating, 0)
             ) AS top_rating
          FROM user_characters uc
          LEFT JOIN pvp_stats ps ON ps.character_id = uc.id

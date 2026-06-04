@@ -63,15 +63,16 @@ async function syncMemberStats(member) {
 
   await pool.execute(
     `INSERT INTO guild_member_stats
-      (guild_member_id, arena_2v2, arena_3v3, solo_shuffle, rbg_rating, honorable_kills,
+      (guild_member_id, arena_2v2, arena_3v3, solo_shuffle, rbg_rating, blitz_rating, honorable_kills,
        killing_blows, arenas_played, arenas_won, arenas_lost, bgs_played, bgs_won,
        total_deaths, creatures_killed, dungeons_entered, raids_entered,
        quests_completed, achievement_points, mythic_plus_rating,
        item_level, highest_mplus_key, mythic_bosses_killed, spec, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
      ON DUPLICATE KEY UPDATE
        arena_2v2 = VALUES(arena_2v2), arena_3v3 = VALUES(arena_3v3),
        solo_shuffle = VALUES(solo_shuffle), rbg_rating = VALUES(rbg_rating),
+       blitz_rating = VALUES(blitz_rating),
        honorable_kills = VALUES(honorable_kills),
        killing_blows = VALUES(killing_blows),
        arenas_played = VALUES(arenas_played), arenas_won = VALUES(arenas_won),
@@ -93,6 +94,7 @@ async function syncMemberStats(member) {
       p.arena_3v3 || 0,
       p.solo_shuffle || 0,
       p.rbg_rating || 0,
+      p.blitz_rating || 0,
       p.honorable_kills || 0,
       a.killing_blows || 0,
       a.arenas_played || 0,
