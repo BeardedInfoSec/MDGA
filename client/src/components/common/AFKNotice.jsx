@@ -83,53 +83,53 @@ export default function AFKNotice({ initialUntil, initialReason }) {
         {status && <span className={styles.status}>{status}</span>}
       </div>
       {isActive ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-          <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-            <strong>Active until:</strong> {until}
-          </div>
+        <div className={styles.fieldStack}>
+          <div className={styles.activeRow}><strong>Active until:</strong> {until}</div>
           {reason && (
-            <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
-              &ldquo;{reason}&rdquo;
-            </div>
+            <div className={styles.activeReason}>&ldquo;{reason}&rdquo;</div>
           )}
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          <div className={styles.hint}>
             This is a hint to officers during roster audits — it does not guarantee your character won&apos;t be removed.
           </div>
-          <button type="button" className="btn btn--secondary btn--sm" disabled={saving} onClick={clear}>
-            Clear AFK notice
-          </button>
+          <div className={styles.actions}>
+            <button type="button" className="btn btn--secondary btn--sm" disabled={saving} onClick={clear}>
+              Clear AFK notice
+            </button>
+          </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 'var(--font-size-xs)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)' }}>Duration</span>
+        <div className={styles.fieldStack}>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Duration</span>
             <select
+              className={styles.fieldInput}
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
-              style={{ padding: '6px 10px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)' }}
             >
               {DURATION_OPTIONS.map((o) => (
                 <option key={o.days} value={o.days}>{o.label}</option>
               ))}
             </select>
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 'var(--font-size-xs)', textTransform: 'uppercase', letterSpacing: 1, color: 'var(--color-text-secondary)' }}>Reason (optional)</span>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Reason (optional)</span>
             <textarea
+              className={styles.fieldTextarea}
               value={draftReason}
               onChange={(e) => setDraftReason(e.target.value)}
               maxLength={255}
               rows={2}
               placeholder="E.g., exam week, travel, deployment…"
-              style={{ padding: '6px 10px', background: 'var(--color-black)', color: 'var(--color-text-primary)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-sm)', fontFamily: 'var(--font-ui)' }}
             />
           </label>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+          <div className={styles.hint}>
             This is a hint to officers during roster audits. It does <strong>not</strong> guarantee your character won&apos;t be removed.
           </div>
-          <button type="button" className="btn btn--primary btn--sm" disabled={saving} onClick={save}>
-            {saving ? 'Saving…' : 'Set AFK notice'}
-          </button>
+          <div className={styles.actions}>
+            <button type="button" className="btn btn--secondary btn--sm" disabled={saving} onClick={save}>
+              {saving ? 'Saving…' : 'Set AFK notice'}
+            </button>
+          </div>
         </div>
       )}
     </div>

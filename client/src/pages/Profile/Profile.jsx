@@ -8,6 +8,8 @@ import { primaryName, secondaryName } from '../../utils/userDisplay';
 import GuildFlag from '../../components/common/GuildFlag';
 import NotificationPrefs from '../../components/common/NotificationPrefs';
 import AFKNotice from '../../components/common/AFKNotice';
+import WoWAddonCard from '../../components/common/WoWAddonCard';
+import settingsStyles from '../../components/common/NotificationPrefs.module.css';
 import styles from './Profile.module.css';
 
 const WOW_CLASS_COLORS = {
@@ -40,7 +42,7 @@ function normalizeRealm(value) {
 }
 
 export default function Profile() {
-  const { user, apiFetch, userTimezone, updateTimezone } = useAuth();
+  const { user, apiFetch, userTimezone, updateTimezone, isOfficer } = useAuth();
   const [tzEditing, setTzEditing] = useState(false);
   const [searchParams] = useSearchParams();
 
@@ -865,27 +867,16 @@ export default function Profile() {
         </section>
 
         {isOwnProfile && (
-          <AFKNotice
-            initialUntil={profile?.user?.afk_until || null}
-            initialReason={profile?.user?.afk_reason || ''}
-          />
-        )}
-
-        {isOwnProfile && <NotificationPrefs />}
-
-        {isOwnProfile && (
-          <div style={{ marginTop: 'var(--space-4)', padding: 'var(--space-4)', background: 'var(--color-black-soft)', border: '1px solid var(--color-gray-700)', borderRadius: 'var(--border-radius-md)' }}>
-            <h3 style={{ margin: '0 0 var(--space-1)', fontFamily: 'var(--font-display)', fontSize: 'var(--font-size-lg)', color: 'var(--color-gold)' }}>WoW Addon</h3>
-            <p style={{ margin: '0 0 var(--space-3)', fontFamily: 'var(--font-ui)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-              The in-game MDGA addon adds a "Generate Report" button and powers the officer audit tooling. Install it in your AddOns folder like any other WoW addon.
-            </p>
-            <a
-              href="/wow_addon/MDGA.zip"
-              download
-              className="btn btn--secondary btn--sm"
-            >
-              Download MDGA addon
-            </a>
+          <div className={settingsStyles.settingsGrid}>
+            <AFKNotice
+              initialUntil={profile?.user?.afk_until || null}
+              initialReason={profile?.user?.afk_reason || ''}
+            />
+            <NotificationPrefs />
+            {/* WoW addon download is officer-and-above only — most members
+                don't need to grab the addon directly (it's the officer audit
+                workflow piece). Members who do can ask any officer. */}
+            {isOfficer() && <WoWAddonCard />}
           </div>
         )}
 

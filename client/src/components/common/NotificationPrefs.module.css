@@ -101,3 +101,79 @@
   left: 20px;
   background: #fff;
 }
+
+/* ── Shared profile-settings layout ──
+   Profile-page Settings panels (AFK, Notifications, WoW Addon) used to stack
+   full-width which wasted right-side space and made the lowest panels read as
+   afterthoughts. settingsGrid arranges them as auto-flowing cards: side-by-side
+   on wider screens, stacked on mobile. Each child still uses .panel for chrome
+   so the styling stays consistent across panels. */
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  align-items: start;
+}
+
+/* Reset .panel's individual top-margin when it lives in a grid — the grid's
+   gap handles spacing now. */
+.settingsGrid > .panel { margin-top: 0; }
+
+/* Reusable form-field bits for panel-local controls (AFK form, etc.). Avoids
+   the inline-style splatter we had in AFKNotice. */
+.fieldStack { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+
+.fieldLabel {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-secondary);
+}
+
+.fieldInput {
+  padding: 6px 10px;
+  background: var(--color-black);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+.fieldInput:focus { outline: 1px solid var(--color-gold-dark); }
+
+.fieldTextarea {
+  composes: fieldInput;
+  resize: vertical;
+  min-height: 56px;
+}
+
+.hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.activeRow {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.activeReason {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* Button row that sits at the end of a panel's controls. align-self: start so
+   buttons size to their content instead of stretching to the column width
+   (which is what made the old AFK button read as a giant red destructive bar). */
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-self: flex-start;
+  margin-top: var(--space-1);
+}
