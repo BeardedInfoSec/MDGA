@@ -133,6 +133,7 @@ app.use('/api/discord-roles', require('./routes/discord-roles'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/guild', require('./routes/guild'));
 app.use('/api/carousel', require('./routes/carousel'));
+app.use('/api/overlord', require('./routes/overlord'));
 app.use('/api/addon', require('./routes/addon'));
 app.use('/api/config', require('./routes/config'));
 app.use('/api/reconciliation', require('./routes/reconciliation'));

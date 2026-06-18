@@ -18,6 +18,7 @@ import Profile from './pages/Profile/Profile';
 import Admin from './pages/Admin/Admin';
 import OfficerToolkitAuth from './pages/OfficerToolkit/OfficerToolkitAuth';
 import WowAddon from './pages/WowAddon/WowAddon';
+import Overlord from './pages/Overlord/Overlord';
 
 export default function App() {
   return (
@@ -30,6 +31,11 @@ export default function App() {
         <Route path="/join" element={<Join />} />
         <Route path="/story" element={<Story />} />
         <Route path="/leadership" element={<Leadership />} />
+
+        {/* Hidden "Overlord" daily-newsletter archive. Deliberately NOT in
+            the nav — direct-link only (mdga.gg/overlord). Public read;
+            officers get an inline upload + delete panel on the page. */}
+        <Route path="/overlord" element={<Overlord />} />
 
         <Route path="/events" element={<Events />} />
 

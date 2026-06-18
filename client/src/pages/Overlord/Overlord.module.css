@@ -1,0 +1,236 @@
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6);
+  font-family: var(--font-ui);
+}
+
+.header {
+  margin-bottom: var(--space-8);
+  text-align: center;
+}
+
+.eyebrow {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-3xl, 2.25rem);
+  color: var(--color-gold);
+  letter-spacing: 1px;
+  margin: 0 0 var(--space-3);
+}
+
+.subtitle {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 560px;
+}
+
+/* ---- Officer upload panel ---- */
+.uploadCard {
+  padding: var(--space-6);
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--space-8);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-4);
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  color: var(--color-gold);
+  letter-spacing: 0.5px;
+}
+
+.cardMeta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.uploadGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldLabel {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.field input {
+  background: var(--color-black, #0a0a0a);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.uploadActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.notice {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* ---- Gallery ---- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-6);
+}
+
+.tile {
+  position: relative;
+  margin: 0;
+  background: var(--color-gray-900);
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.tile:hover {
+  border-color: var(--color-gold);
+  transform: translateY(-2px);
+}
+
+.thumbButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: var(--color-black, #0a0a0a);
+  cursor: pointer;
+}
+
+.thumbButton img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+.caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+}
+
+.tileTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.tileDate {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.deleteButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-gray-700);
+  border-radius: var(--border-radius-sm);
+  background: rgba(10, 10, 10, 0.8);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.deleteButton:hover {
+  color: var(--color-danger, #e05260);
+  border-color: var(--color-danger, #e05260);
+}
+
+.empty {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+  padding: var(--space-12) 0;
+}
+
+/* ---- Lightbox ---- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgba(0, 0, 0, 0.9);
+  cursor: zoom-out;
+}
+
+.lightboxImg {
+  max-width: 95vw;
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: var(--border-radius-sm);
+  cursor: default;
+}
+
+.lightboxClose {
+  position: absolute;
+  top: var(--space-5);
+  right: var(--space-5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-gray-700);
+  border-radius: 50%;
+  background: rgba(10, 10, 10, 0.8);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.lightboxClose:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
