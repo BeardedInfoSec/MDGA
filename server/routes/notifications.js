@@ -1,10 +1,22 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const stream = require('../services/notification-stream');
 
 const router = express.Router();
+
+// Short-lived, single-use tickets for the SSE stream. EventSource can't send
+// an Authorization header, so instead of putting the long-lived JWT in the URL
+// (where it lands in proxy access logs / browser history), the client first
+// calls POST /stream-ticket (header-authenticated) to mint a 30s opaque ticket
+// and passes THAT in the URL. Worthless if logged.
+const streamTickets = new Map(); // ticket -> { userId, expiresAt }
+const STREAM_TICKET_TTL_MS = 30 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, v] of streamTickets) if (v.expiresAt <= now) streamTickets.delete(t);
+}, 60 * 1000);
 
 const DEFAULT_PREFS = Object.freeze({
   mention: true, reply: true, event: true, giveaway_kickoff: true,
@@ -118,20 +130,29 @@ router.put('/prefs', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/notifications/stream-ticket — mint a 30s single-use ticket the
+// EventSource can pass in the URL instead of the JWT. Header-authenticated.
+router.post('/stream-ticket', requireAuth, (req, res) => {
+  const ticket = crypto.randomBytes(24).toString('base64url');
+  streamTickets.set(ticket, { userId: req.user.id, expiresAt: Date.now() + STREAM_TICKET_TTL_MS });
+  res.json({ ticket, expiresInSeconds: STREAM_TICKET_TTL_MS / 1000 });
+});
+
 // GET /api/notifications/stream — Server-Sent Events stream of new
-// notifications for the current user. EventSource doesn't let us send
-// custom headers, so we accept the JWT via ?token=<jwt> on this one
-// endpoint. (Same secret/decode path the auth middleware uses; we just
-// can't share the middleware because middleware reads the Authorization
-// header.) Emits one `notification` event per row inserted.
+// notifications for the current user. Authenticated via a single-use ?ticket=
+// minted by /stream-ticket (the JWT itself is never placed in the URL).
+// Emits one `notification` event per row inserted.
 router.get('/stream', (req, res) => {
-  const token = String(req.query.token || '').trim();
-  if (!token) { res.status(401).end('Missing token'); return; }
-  let payload;
-  try { payload = jwt.verify(token, process.env.JWT_SECRET); }
-  catch { res.status(401).end('Invalid token'); return; }
-  const userId = Number(payload.id);
-  if (!userId) { res.status(401).end('Invalid token'); return; }
+  const ticket = String(req.query.ticket || '').trim();
+  const entry = ticket ? streamTickets.get(ticket) : null;
+  if (!entry || entry.expiresAt <= Date.now()) {
+    streamTickets.delete(ticket);
+    res.status(401).end('Invalid or expired ticket');
+    return;
+  }
+  streamTickets.delete(ticket); // single use
+  const userId = Number(entry.userId);
+  if (!userId) { res.status(401).end('Invalid ticket'); return; }
 
   res.set({
     'Content-Type': 'text/event-stream',

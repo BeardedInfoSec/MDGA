@@ -81,18 +81,82 @@ def archive_snapshot_json(snap: 'GuildSnapshot', dest_dir: str) -> str:
     return path
 
 
+# ── Token-at-rest protection ──────────────────────────────────────────────
+# The website JWT is a long-lived, password-equivalent credential. Storing it
+# as cleartext in mdga-audit-config.json means any local malware / cloud-backup
+# sync / shared PC could lift it. On Windows we encrypt it with DPAPI
+# (CryptProtectData), which ties the ciphertext to the current OS user account —
+# no extra dependency, and the file is useless if copied to another machine/user.
+import base64
+import ctypes
+from ctypes import wintypes
+
+
+def _dpapi(blob: bytes, encrypt: bool):
+    """Run a buffer through Windows DPAPI. Returns bytes, or None if unavailable."""
+    if os.name != "nt":
+        return None
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    src = DATA_BLOB(len(blob), ctypes.cast(ctypes.create_string_buffer(blob, len(blob)),
+                                           ctypes.POINTER(ctypes.c_char)))
+    out = DATA_BLOB()
+    fn = ctypes.windll.crypt32.CryptProtectData if encrypt else ctypes.windll.crypt32.CryptUnprotectData
+    ok = fn(ctypes.byref(src), None, None, None, None, 0, ctypes.byref(out))
+    if not ok:
+        return None
+    try:
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out.pbData)
+
+
+def _encrypt_token(token: str):
+    enc = _dpapi(token.encode("utf-8"), True)
+    return base64.b64encode(enc).decode("ascii") if enc else None
+
+
+def _decrypt_token(token_enc: str):
+    try:
+        dec = _dpapi(base64.b64decode(token_enc), False)
+        return dec.decode("utf-8") if dec else None
+    except Exception:
+        return None
+
+
 def load_config() -> dict[str, Any]:
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
+            config = json.load(f) or {}
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+    # Transparently decrypt the DPAPI-protected token back into config["token"]
+    # for in-memory use. Falls back to any legacy plaintext "token".
+    enc = config.pop("token_enc", None)
+    if enc:
+        tok = _decrypt_token(enc)
+        if tok:
+            config["token"] = tok
+    return config
 
 
 def save_config(config: dict[str, Any]) -> None:
     try:
+        to_write = dict(config)
+        token = to_write.pop("token", None)
+        # Prefer DPAPI-encrypted storage; only fall back to plaintext if DPAPI
+        # is unavailable (non-Windows dev), with a visible warning.
+        if token:
+            enc = _encrypt_token(token)
+            if enc:
+                to_write["token_enc"] = enc
+            else:
+                to_write["token"] = token
+                print("  ! DPAPI unavailable — storing token unencrypted. Treat the config file as a secret.")
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+            json.dump(to_write, f, indent=2)
     except Exception as e:
         print(f"  ! Couldn't save config: {e}")
 

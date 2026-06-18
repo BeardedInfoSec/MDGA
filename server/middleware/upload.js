@@ -8,6 +8,12 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB raw upload limit (server compresses to WebP)
 const MAX_WIDTH = 1920;
 const WEBP_QUALITY = 80;
+// Hard cap on decoded pixels (width × height × frames) to defend against
+// decompression bombs — a small file can declare a huge canvas. ~32 MP is
+// generous for any real screenshot/banner while far below sharp's ~268 MP
+// default. Applied to the sharp path AND validated for GIFs (which we store
+// as-is and therefore must check explicitly).
+const MAX_INPUT_PIXELS = 32 * 1000 * 1000;
 
 const MIME_TO_EXT = {
   'image/jpeg': 'jpg',
@@ -99,10 +105,19 @@ async function saveValidatedImage(file) {
   let outputExt;
 
   if (detectedExt === 'gif') {
+    // GIFs are stored byte-for-byte (to preserve animation), so they never
+    // pass through sharp's resize/limit. Validate dimensions × frames here so
+    // a crafted GIF can't be a decompression bomb served to every visitor.
+    const meta = await sharp(file.buffer, { animated: true }).metadata();
+    const frames = meta.pages || 1;
+    const totalPixels = (meta.width || 0) * (meta.pageHeight || meta.height || 0) * frames;
+    if (!totalPixels || totalPixels > MAX_INPUT_PIXELS) {
+      throw new Error('Image dimensions are too large');
+    }
     outputBuffer = file.buffer;
     outputExt = 'gif';
   } else {
-    outputBuffer = await sharp(file.buffer)
+    outputBuffer = await sharp(file.buffer, { limitInputPixels: MAX_INPUT_PIXELS })
       .resize({ width: MAX_WIDTH, withoutEnlargement: true })
       .webp({ quality: WEBP_QUALITY })
       .toBuffer();
@@ -116,8 +131,24 @@ async function saveValidatedImage(file) {
   return filename;
 }
 
+// Validate a client-supplied image URL. We only allow server-local upload
+// paths (what saveValidatedImage produces) plus the static /images mount —
+// NOT arbitrary external URLs (off-site hotlink / tracking-pixel that leaks
+// visitor IPs) or data:/javascript: URIs. Returns the trimmed path or null.
+function sanitizeLocalImageUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  // Must be a root-relative path into our own upload/image mounts. Reject
+  // protocol-relative (//host), absolute URLs, and any scheme.
+  if (/^\/(uploads|images)\/[A-Za-z0-9._\-/]+$/.test(s) && !s.includes('..')) {
+    return s;
+  }
+  return null;
+}
+
 module.exports = {
   uploadSingleImage,
   saveValidatedImage,
+  sanitizeLocalImageUrl,
   MAX_FILE_SIZE,
 };

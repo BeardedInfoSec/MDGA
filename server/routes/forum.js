@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const pool = require('../db');
 const { requireAuth, requirePermission, loadUserPermissions } = require('../middleware/auth');
+const { sanitizeLocalImageUrl } = require('../middleware/upload');
 const { logAdminAction } = require('../services/audit-log');
 const { sendOfficerAlert, sendDiscordAnnouncement } = require('../bot');
 const { notifyMentions, notifyNewMentions, createNotification, broadcastNotification } = require('../services/notifications');
@@ -15,7 +16,7 @@ async function getOptionalActiveUser(req) {
 
   try {
     const token = authHeader.slice(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
     const [rows] = await pool.execute(
       'SELECT id, `rank`, status FROM users WHERE id = ?',
@@ -122,14 +123,16 @@ router.get('/categories', async (req, res) => {
 });
 
 // GET /api/forum/search?q=term
-router.get('/search', async (req, res) => {
+// Search requires auth: it runs a heavy non-indexable multi-LIKE scan, so we
+// don't expose it to anonymous traffic (the forum itself is members-only anyway).
+router.get('/search', requireAuth, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
-    if (!q || q.length < 2) {
-      return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+    if (!q || q.length < 3) {
+      return res.status(400).json({ error: 'Search query must be at least 3 characters' });
     }
 
-    const viewer = await getOptionalActiveUser(req);
+    const viewer = req.user;
     const canAccessOfficer = hasOfficerCategoryAccess(viewer);
 
     // Escape LIKE wildcards so user input is treated as literal text
@@ -511,18 +514,20 @@ router.post('/posts', requireAuth, async (req, res) => {
       }
     }
 
+    // Only accept server-local image paths (reject off-site/data: URLs).
+    const cleanImageUrl = sanitizeLocalImageUrl(imageUrl);
     const [result] = await pool.execute(
       'INSERT INTO forum_posts (category_id, user_id, title, content, image_url, publish_at, publish_timezone, pinned, locked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [categoryId, req.user.id, cleanTitle, cleanContent, imageUrl || null, publishAtValue, publishTimezoneValue, pinnedOnCreate, lockedOnCreate]
+      [categoryId, req.user.id, cleanTitle, cleanContent, cleanImageUrl, publishAtValue, publishTimezoneValue, pinnedOnCreate, lockedOnCreate]
     );
     const newPostId = result.insertId;
     // Multi-image attachments (forum #29). The single image_url stays
     // populated above for back-compat with anything that reads the legacy
     // column; everything new reads from forum_post_images instead.
     const urls = Array.isArray(imageUrls) ? imageUrls : [];
-    if (imageUrl && !urls.includes(imageUrl)) urls.unshift(imageUrl);
+    if (cleanImageUrl && !urls.includes(cleanImageUrl)) urls.unshift(cleanImageUrl);
     const cleanUrls = urls
-      .map((u) => (typeof u === 'string' ? u.trim() : ''))
+      .map((u) => sanitizeLocalImageUrl(u))
       .filter((u) => u && u.length <= 500)
       .slice(0, 10);
     if (cleanUrls.length > 0) {
@@ -799,6 +804,8 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
 
     const { content, imageUrl } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
+    // Only accept server-local image paths (reject off-site/data: URLs).
+    const cleanImageUrl = sanitizeLocalImageUrl(imageUrl);
 
     // Check for an active giveaway config on this post. If one exists, we
     // (1) enforce the per-user rate limit before the INSERT, and (2) after
@@ -830,7 +837,7 @@ router.post('/posts/:id/comments', requireAuth, async (req, res) => {
 
     const [result] = await pool.execute(
       'INSERT INTO forum_comments (post_id, user_id, content, image_url) VALUES (?, ?, ?, ?)',
-      [postId, req.user.id, content, imageUrl || null]
+      [postId, req.user.id, content, cleanImageUrl]
     );
     const newCommentId = result.insertId;
 
@@ -1680,11 +1687,12 @@ router.put('/posts/:id/move', requireAuth, async (req, res) => {
       [targetId, postId]
     );
     logAdminAction({
-      adminId: req.user.id,
-      action: 'forum.move_post',
+      adminUserId: req.user.id,
+      actionType: 'post.move',
       targetType: 'forum_post',
       targetId: postId,
-      details: { from: postRows[0].category_id, to: targetId, target_name: catRows[0].name },
+      summary: `Moved post #${postId} to "${catRows[0].name}"`,
+      metadata: { from: postRows[0].category_id, to: targetId, target_name: catRows[0].name },
     });
     res.json({ message: 'Post moved', changed: true, categoryId: targetId });
   } catch (err) {

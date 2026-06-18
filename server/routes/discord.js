@@ -262,7 +262,7 @@ router.get('/callback', async (req, res) => {
 
       // Load permissions and issue JWT
       const permissions = await loadUserPermissions(user.id);
-      const jwt = signToken({ id: user.id, username: user.username, rank: newRank }, permissions);
+      const jwt = signToken({ id: user.id, username: user.username, rank: newRank, token_version: user.token_version }, permissions);
       let characterCount = 0;
       try {
         const [[ccRow]] = await pool.execute(
@@ -304,7 +304,7 @@ router.get('/callback', async (req, res) => {
         await pool.execute('UPDATE users SET last_login_at = NOW() WHERE id = ?', [user.id]);
         const [freshUser] = await pool.execute('SELECT * FROM users WHERE id = ?', [user.id]);
         const permissions = await loadUserPermissions(user.id);
-        const jwt = signToken({ id: user.id, username: user.username, rank: freshUser[0].rank }, permissions);
+        const jwt = signToken({ id: user.id, username: user.username, rank: freshUser[0].rank, token_version: freshUser[0].token_version }, permissions);
         const userPayload = {
           id: user.id,
           username: user.username,

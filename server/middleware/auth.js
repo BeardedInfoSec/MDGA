@@ -7,12 +7,25 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 const JWT_EXPIRES_IN = '24h';
+// Pin the signing/verification algorithm. Without an explicit allow-list,
+// jwt.verify accepts any algorithm in the token header, which opens an
+// algorithm-confusion surface. We only ever issue HS256.
+const JWT_ALGORITHMS = ['HS256'];
 
 function signToken(user, permissions) {
   return jwt.sign(
-    { id: user.id, username: user.username, rank: user.rank, permissions: permissions || [] },
+    {
+      id: user.id,
+      username: user.username,
+      rank: user.rank,
+      permissions: permissions || [],
+      // Per-user token version. Bumping users.token_version (e.g. via
+      // /auth/logout-all) invalidates every outstanding token for that
+      // user without rotating the global JWT_SECRET.
+      tv: user.token_version || 0,
+    },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
+    { expiresIn: JWT_EXPIRES_IN, algorithm: JWT_ALGORITHMS[0] }
   );
 }
 
@@ -36,13 +49,19 @@ async function requireAuth(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS });
     const [rows] = await pool.execute(
-      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone, account_locked_at, account_locked_until, account_locked_reason FROM users WHERE id = ?',
+      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone, token_version, account_locked_at, account_locked_until, account_locked_reason FROM users WHERE id = ?',
       [decoded.id]
     );
     if (rows.length === 0) {
       return res.status(401).json({ error: 'User not found' });
+    }
+    // Per-user revocation: a token whose tv claim no longer matches the
+    // current users.token_version has been revoked. Missing claim == 0
+    // (legacy tokens issued before this column existed stay valid until expiry).
+    if ((decoded.tv || 0) !== (rows[0].token_version || 0)) {
+      return res.status(401).json({ error: 'Token revoked' });
     }
     if (rows[0].status !== 'active') {
       return res.status(403).json({ error: 'Account not active', status: rows[0].status });
@@ -82,12 +101,12 @@ async function optionalAuth(req, res, next) {
   }
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS });
     const [rows] = await pool.execute(
-      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone FROM users WHERE id = ?',
+      'SELECT id, username, display_name, `rank`, display_rank, status, avatar_url, realm, character_name, discord_id, discord_username, timezone, token_version FROM users WHERE id = ?',
       [decoded.id]
     );
-    if (rows.length > 0 && rows[0].status === 'active') {
+    if (rows.length > 0 && rows[0].status === 'active' && (decoded.tv || 0) === (rows[0].token_version || 0)) {
       req.user = rows[0];
       req.user.permissions = await loadUserPermissions(req.user.id);
     }
@@ -111,11 +130,28 @@ function requireOfficer(req, res, next) {
 function requireGuildMaster(req, res, next) {
   if (!req.user) return res.status(403).json({ error: 'Guild Master access required' });
   // Accept actual guildmaster rank OR any role that grants admin.manage_roles
-  // — lets the website_guru RBAC role reach GM-gated pages (Discord role
-  // mappings, etc.) without needing the literal rank.
+  // — lets the website_guru RBAC role reach GM-gated *read* pages (viewing
+  // Discord role mappings, role lists, etc.) without needing the literal rank.
+  //
+  // SECURITY: Do NOT use this for routes that can MINT privileges (assigning
+  // roles to users, editing rank-affecting Discord mappings). For those use
+  // requireGuildMasterStrict — otherwise an admin.manage_roles holder can
+  // self-promote to full GM. See requireGuildMasterStrict below.
   const isGM = req.user.rank === 'guildmaster';
   const hasAdminRoles = req.user.permissions && req.user.permissions.includes('admin.manage_roles');
   if (!isGM && !hasAdminRoles) {
+    return res.status(403).json({ error: 'Guild Master access required' });
+  }
+  next();
+}
+
+// Strict Guild Master gate — the literal rank only, no permission shortcut.
+// Use on any route that can grant roles/permissions or alter the
+// Discord-role → site-rank mappings, so that holding admin.manage_roles
+// cannot be parlayed into a self-promotion to Guild Master.
+function requireGuildMasterStrict(req, res, next) {
+  if (!req.user) return res.status(403).json({ error: 'Guild Master access required' });
+  if (req.user.rank !== 'guildmaster') {
     return res.status(403).json({ error: 'Guild Master access required' });
   }
   next();
@@ -138,4 +174,4 @@ function requirePermission(...perms) {
   };
 }
 
-module.exports = { signToken, loadUserPermissions, requireAuth, optionalAuth, requireOfficer, requireGuildMaster, requirePermission };
+module.exports = { signToken, loadUserPermissions, requireAuth, optionalAuth, requireOfficer, requireGuildMaster, requireGuildMasterStrict, requirePermission };

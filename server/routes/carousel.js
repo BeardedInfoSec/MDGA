@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth, requireOfficer } = require('../middleware/auth');
-const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
+const { uploadSingleImage, saveValidatedImage, sanitizeLocalImageUrl } = require('../middleware/upload');
 
 const router = express.Router();
 const DEFAULT_HOME_BACKGROUND_IMAGE = '/images/Screenshot_2026-02-06_18-21-39.png';
@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
 // POST /api/carousel — officer+, upload file or provide URL
 router.post('/', requireAuth, requireOfficer, uploadSingleImage.single('image'), async (req, res) => {
   try {
-    let imageUrl = req.body.imageUrl || '';
+    let imageUrl = sanitizeLocalImageUrl(req.body.imageUrl) || '';
     const altText = req.body.altText || '';
 
     // If a file was uploaded, save it and use the upload path
@@ -93,7 +93,7 @@ router.get('/settings', requireAuth, requireOfficer, async (req, res) => {
 // PUT /api/carousel/settings/background — officer+
 router.put('/settings/background', requireAuth, requireOfficer, uploadSingleImage.single('image'), async (req, res) => {
   try {
-    let imageUrl = req.body.imageUrl || '';
+    let imageUrl = sanitizeLocalImageUrl(req.body.imageUrl) || '';
 
     if (req.file) {
       const filename = await saveValidatedImage(req.file);

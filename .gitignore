@@ -7,9 +7,15 @@ node_modules/
 # User uploads
 uploads/
 
-# Dev/diagnostic scripts — these embed the SSH passphrase and prod
-# credentials as literals, must never be committed.
+# Dev/diagnostic scripts — many embed the SSH passphrase and prod
+# credentials as literals, so the whole dir is ignored by default.
+# NOTE: this rule only protects UNTRACKED files; git never auto-ignores
+# already-tracked files. Before pasting any secret into a tools/ script,
+# confirm `git check-ignore <file>` actually reports it as ignored.
+# The shippable audit tool (no secrets) is explicitly un-ignored below.
 tools/
+!tools/mdga-audit/
+!tools/mdga-audit/**
 
 # Member audit data (PII / Discord IDs) — operational, not source.
 MDGA_Audit_Log.xlsx

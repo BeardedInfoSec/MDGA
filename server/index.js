@@ -17,7 +17,12 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      // No 'unsafe-inline' for scripts: the Vite build emits only external
+      // hashed bundles (no inline <script>), so a strict policy doesn't break
+      // anything and restores CSP as a real XSS backstop for the
+      // DOMPurify-sanitized markdown render path. styleSrc keeps
+      // 'unsafe-inline' because React injects inline styles at runtime.
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
@@ -31,12 +36,13 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS — allow Vite dev server in development
+// CORS — allow Vite dev server in development. CORS_ORIGIN may be a
+// comma-separated list so production can allow both mdga.gg and mdga.dev.
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  : [`http://localhost:${PORT}`, 'http://localhost:5173'];
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || [
-    `http://localhost:${PORT}`,
-    'http://localhost:5173',
-  ],
+  origin: corsOrigins,
   credentials: true,
 }));
 
@@ -44,25 +50,35 @@ app.use(cors({
 const { ipBanMiddleware } = require('./ipban');
 app.use(ipBanMiddleware);
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsing. JSON capped at 2mb (image/file uploads go through multer,
+// not JSON, so this only needs to cover text payloads + the occasional
+// pasted roster JSON). urlencoded explicitly capped too.
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Global rate limiter for API routes.
 // Anonymous traffic: 200/15min — tight, since unauthenticated requests
 // have no audit trail and are the actual abuse target.
-// Authenticated traffic (Bearer token present): 2000/15min — power users
-// like officers running admin pages or members during a giveaway launch
-// blew past the old flat 200 limit, causing the dashboard + forum to
-// silently render empty (the frontend treats 429 the same as no data).
-// The Bearer check is throttling, not security — a forged token gets the
-// bigger bucket but every request still 401s downstream, no breach.
+// Authenticated traffic: 2000/15min — power users like officers running
+// admin pages or members during a giveaway launch blew past the old flat
+// 200 limit, causing the dashboard + forum to silently render empty.
+// The larger bucket is granted ONLY for a cryptographically VALID token —
+// previously any "Bearer " prefix sufficed, letting an attacker grab 10x
+// the budget against expensive unauthenticated endpoints with a bogus header.
+const jwtForLimiter = require('jsonwebtoken');
+function hasValidBearer(req) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return false;
+  try {
+    jwtForLimiter.verify(auth.slice(7), process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    return true;
+  } catch {
+    return false;
+  }
+}
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: (req) => {
-    const auth = req.headers.authorization;
-    return (auth && auth.startsWith('Bearer ')) ? 2000 : 200;
-  },
+  max: (req) => (hasValidBearer(req) ? 2000 : 200),
   standardHeaders: true,
   legacyHeaders: false,
 });

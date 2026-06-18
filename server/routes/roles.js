@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db');
-const { requireAuth, requirePermission, requireGuildMaster } = require('../middleware/auth');
+const { requireAuth, requirePermission, requireGuildMaster, requireGuildMasterStrict } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -163,8 +163,10 @@ router.get('/users/:userId', requireAuth, requireGuildMaster, async (req, res) =
   }
 });
 
-// PUT /api/roles/users/:userId — set user's roles (replace all, GM only)
-router.put('/users/:userId', requireAuth, requireGuildMaster, async (req, res) => {
+// PUT /api/roles/users/:userId — set user's roles (replace all).
+// STRICT GM only: assigning roles mints permissions, so this must not be
+// reachable via the admin.manage_roles shortcut (would allow self-promotion).
+router.put('/users/:userId', requireAuth, requireGuildMasterStrict, async (req, res) => {
   try {
     const { roleIds } = req.body;
     const userId = req.params.userId;
@@ -173,12 +175,22 @@ router.put('/users/:userId', requireAuth, requireGuildMaster, async (req, res) =
     const [user] = await pool.execute('SELECT id FROM users WHERE id = ?', [userId]);
     if (user.length === 0) return res.status(404).json({ error: 'User not found' });
 
+    // Validate roleIds: must be an array of positive integers referencing
+    // real roles. Reject anything else rather than silently inserting junk.
+    const ids = Array.isArray(roleIds)
+      ? [...new Set(roleIds.map((r) => parseInt(r, 10)).filter((n) => Number.isInteger(n) && n > 0))]
+      : [];
+    if (ids.length > 0) {
+      const [valid] = await pool.query('SELECT id FROM roles WHERE id IN (?)', [ids]);
+      if (valid.length !== ids.length) {
+        return res.status(400).json({ error: 'One or more role ids are invalid' });
+      }
+    }
+
     // Replace roles
     await pool.execute('DELETE FROM user_roles WHERE user_id = ?', [userId]);
-    if (roleIds && roleIds.length > 0) {
-      for (const rid of roleIds) {
-        await pool.execute('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, rid]);
-      }
+    for (const rid of ids) {
+      await pool.execute('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, rid]);
     }
 
     res.json({ message: 'User roles updated' });

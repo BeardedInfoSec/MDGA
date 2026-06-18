@@ -4,10 +4,15 @@
 // ================================================
 const express = require('express');
 const pool = require('../db');
-const { requireAuth, requireGuildMaster } = require('../middleware/auth');
+const { requireAuth, requireGuildMaster, requireGuildMasterStrict } = require('../middleware/auth');
 const { getGuildRoles } = require('../bot');
 
 const router = express.Router();
+
+// Site ranks that a Discord role may legitimately map to. Anything outside
+// this set is rejected so a crafted mapping can't inject a bogus/elevated rank
+// that the sync would later write to users.rank.
+const ALLOWED_SITE_RANKS = ['recruit', 'member', 'veteran', 'officer', 'guildmaster'];
 
 // GET /api/discord-roles/guild-roles — live Discord roles from bot cache (GM only)
 router.get('/guild-roles', requireAuth, requireGuildMaster, (req, res) => {
@@ -28,8 +33,11 @@ router.get('/mappings', requireAuth, requireGuildMaster, async (req, res) => {
   }
 });
 
-// PUT /api/discord-roles/mappings — batch-replace all mappings (GM only)
-router.put('/mappings', requireAuth, requireGuildMaster, async (req, res) => {
+// PUT /api/discord-roles/mappings — batch-replace all mappings.
+// STRICT GM only: these mappings drive the Discord→rank sync that writes
+// users.rank, so an admin.manage_roles holder must not be able to edit them
+// (could map a Discord role they hold to guildmaster and self-promote).
+router.put('/mappings', requireAuth, requireGuildMasterStrict, async (req, res) => {
   const { mappings } = req.body;
   if (!Array.isArray(mappings)) {
     return res.status(400).json({ error: 'mappings must be an array' });
@@ -53,6 +61,13 @@ router.put('/mappings', requireAuth, requireGuildMaster, async (req, res) => {
 
       // Skip if neither rank nor role is set
       if (!siteRank && !siteRoleId) continue;
+
+      // Reject unknown ranks so a crafted mapping can't inject a bogus value
+      // the sync would write to users.rank.
+      if (siteRank && !ALLOWED_SITE_RANKS.includes(siteRank)) {
+        await conn.rollback();
+        return res.status(400).json({ error: `Invalid site_rank: ${siteRank}` });
+      }
 
       await conn.execute(
         'INSERT INTO discord_role_mappings (discord_role_id, discord_role_name, site_rank, site_role_id) VALUES (?, ?, ?, ?)',

@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { requireAuth, requireOfficer } = require('../middleware/auth');
-const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
+const { uploadSingleImage, saveValidatedImage, sanitizeLocalImageUrl } = require('../middleware/upload');
 
 const router = express.Router();
 
@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
 // POST /api/overlord — officer+, upload an image file (or provide a URL).
 router.post('/', requireAuth, requireOfficer, uploadSingleImage.single('image'), async (req, res) => {
   try {
-    let imageUrl = req.body.imageUrl || '';
+    let imageUrl = sanitizeLocalImageUrl(req.body.imageUrl) || '';
 
     if (req.file) {
       const filename = await saveValidatedImage(req.file);

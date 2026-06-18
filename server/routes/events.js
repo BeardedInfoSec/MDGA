@@ -1,9 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const { DateTime } = require('luxon');
 const pool = require('../db');
-const { requireAuth, requirePermission } = require('../middleware/auth');
+const { requireAuth, requirePermission, optionalAuth } = require('../middleware/auth');
 const { uploadSingleImage, saveValidatedImage } = require('../middleware/upload');
 const { broadcastNotification } = require('../services/notifications');
 const { sendDiscordAnnouncement } = require('../bot');
@@ -82,24 +81,15 @@ function normalizeEventPayload(payload) {
   };
 }
 
-// GET /api/events — public, optionally includes user RSVP status if authenticated
-router.get('/', async (req, res) => {
+// GET /api/events — public, optionally includes user RSVP status if authenticated.
+// optionalAuth resolves the viewer against the DB (current rank/permissions/
+// status), so a demoted/revoked/banned user can't keep officer-only scheduled-
+// event visibility via a still-valid token carrying stale claims.
+router.get('/', optionalAuth, async (req, res) => {
   try {
-    // Try to extract user ID + rank from token (optional — no 401 if
-    // missing/invalid). Rank determines whether scheduled (future
-    // publish_at) events are visible.
-    let userId = null;
-    let viewerRank = null;
-    let viewerPerms = [];
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-        userId = decoded.id;
-        viewerRank = decoded.rank || null;
-        viewerPerms = Array.isArray(decoded.permissions) ? decoded.permissions : [];
-      } catch { /* ignore invalid token */ }
-    }
+    const userId = req.user ? req.user.id : null;
+    const viewerRank = req.user ? req.user.rank : null;
+    const viewerPerms = (req.user && req.user.permissions) ? req.user.permissions : [];
     const canSeeScheduled = ['officer', 'guildmaster'].includes(viewerRank) || viewerPerms.includes('events.manage');
     const publishGate = canSeeScheduled ? '' : 'AND (e.publish_at IS NULL OR e.publish_at <= NOW())';
 
@@ -121,7 +111,9 @@ router.get('/', async (req, res) => {
       FROM events e
       LEFT JOIN users creator ON creator.id = e.created_by
       WHERE e.starts_at IS NOT NULL ${publishGate}
+        AND e.starts_at >= (NOW() - INTERVAL 365 DAY)
       ORDER BY e.starts_at ASC
+      LIMIT 1000
     `);
 
     // Attach the first 8 going-RSVP users per event for the avatar stack on
@@ -522,7 +514,9 @@ router.post(
       res.status(201).json({ id: result.insertId, url, caption, uploaded_by: req.user.id });
     } catch (err) {
       console.error('Upload screenshot error:', err);
-      res.status(500).json({ error: err.message || 'Failed to upload screenshot' });
+      // Surface only known, safe upload-validation messages; never raw errors.
+      const safe = /file|image|type|size|large/i.test(err.message || '') ? err.message : 'Failed to upload screenshot';
+      res.status(500).json({ error: safe });
     }
   }
 );

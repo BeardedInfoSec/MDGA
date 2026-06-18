@@ -232,7 +232,8 @@ router.get('/snapshot', requireAuth, requireOfficer, async (req, res) => {
         if (!r.ok) return { error: `${r.status}`, rows: [] };
         return await r.json();
       } catch (err) {
-        return { error: err.message, rows: [] };
+        console.error('[Reconciliation] fetch error:', err);
+        return { error: 'Fetch failed', rows: [] };
       }
     };
 
@@ -403,7 +404,7 @@ router.post('/action', requireAuth, requireOfficer, async (req, res) => {
     }
   } catch (err) {
     console.error('[Reconciliation] action error:', err);
-    res.status(500).json({ error: 'Action failed', detail: err.message });
+    res.status(500).json({ error: 'Action failed' });
   }
 });
 

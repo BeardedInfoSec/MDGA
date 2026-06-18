@@ -8,7 +8,7 @@ import styles from './NotificationBell.module.css';
 const POLL_MS = 30 * 1000;
 
 // Bell icon + dropdown for in-app notifications. Two delivery paths:
-//   1. SSE stream (/api/notifications/stream?token=...) — server pushes
+//   1. SSE stream (/api/notifications/stream?ticket=...) — server pushes
 //      new notifications as they're inserted, so mentions and broadcasts
 //      land immediately. The 'notification' event handler bumps the
 //      unread counter and refreshes the list if the dropdown is open.
@@ -69,21 +69,46 @@ export default function NotificationBell() {
     if (!isLoggedIn || !token || typeof window === 'undefined' || !('EventSource' in window)) {
       return undefined;
     }
-    const url = `/api/notifications/stream?token=${encodeURIComponent(token)}`;
-    const es = new EventSource(url);
-    es.addEventListener('notification', () => {
-      setUnread((u) => u + 1);
-      // If the dropdown is already showing, refetch so the new row appears.
-      // Pulled from state via the ref-like pattern: use the latest open value.
-      setOpen((wasOpen) => { if (wasOpen) fetchList(); return wasOpen; });
-    });
-    es.onerror = () => {
-      // EventSource auto-reconnects on transient errors. If the server
-      // returns 401 (e.g. JWT expired), it'll keep retrying and the
-      // poll continues to keep the count honest.
+    let es = null;
+    let closed = false;
+    let reconnectTimer = null;
+
+    // Mint a short-lived single-use ticket (header-authenticated), then open
+    // the stream with it. The JWT is never placed in the URL. EventSource
+    // can't carry headers, so on disconnect we re-mint and reconnect ourselves
+    // (a ticket is single-use, so the browser's built-in retry can't reuse it).
+    const connect = async () => {
+      if (closed) return;
+      try {
+        const res = await apiFetch('/notifications/stream-ticket', { method: 'POST' });
+        if (!res.ok) throw new Error('ticket failed');
+        const { ticket } = await res.json();
+        if (closed || !ticket) return;
+        es = new EventSource(`/api/notifications/stream?ticket=${encodeURIComponent(ticket)}`);
+        es.addEventListener('notification', () => {
+          setUnread((u) => u + 1);
+          setOpen((wasOpen) => { if (wasOpen) fetchList(); return wasOpen; });
+        });
+        es.onerror = () => {
+          // Stream dropped — close and reconnect with a fresh ticket after a
+          // short backoff. The 30s poll keeps the count honest meanwhile.
+          if (closed) return;
+          try { es.close(); } catch { /* noop */ }
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 5000);
+        };
+      } catch {
+        if (!closed) { clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 10000); }
+      }
     };
-    return () => es.close();
-  }, [isLoggedIn, token, fetchList]);
+    connect();
+
+    return () => {
+      closed = true;
+      clearTimeout(reconnectTimer);
+      if (es) { try { es.close(); } catch { /* noop */ } }
+    };
+  }, [isLoggedIn, token, apiFetch, fetchList]);
 
   // Re-fetch list every time the dropdown opens
   useEffect(() => {

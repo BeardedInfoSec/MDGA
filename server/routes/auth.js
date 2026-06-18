@@ -1,5 +1,7 @@
 const express = require('express');
+const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 const pool = require('../db');
 const { signToken, loadUserPermissions, requireAuth } = require('../middleware/auth');
 const { sendOfficerAlert } = require('../bot');
@@ -8,17 +10,27 @@ const { sendEmail } = require('../services/email');
 
 const router = express.Router();
 
-// Rate limiting — track failed login attempts per IP
-const loginAttempts = new Map(); // ip -> { count, lockedUntil }
+// Rate limiting — track failed login attempts per IP AND per account.
+// The per-account counter (keyed by username) defends against distributed
+// guessing where an attacker rotates source IPs to defeat the per-IP limit.
+const loginAttempts = new Map();   // ip -> { count, lockedUntil }
+const accountAttempts = new Map(); // username(lower) -> { count, lockedUntil }
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+// Fixed bcrypt hash compared against when the username doesn't exist, so a
+// missing account costs the same wall-clock as a real one (defeats timing-based
+// username enumeration). The plaintext it hashes is irrelevant.
+const DUMMY_BCRYPT_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3f0i.kqQ1q3Q1q3Q1q3Q1q3Q1q3Q1q2';
 
 // Cleanup expired entries every 10 minutes
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, data] of loginAttempts) {
-    if (data.lockedUntil && now > data.lockedUntil) {
-      loginAttempts.delete(ip);
+  for (const map of [loginAttempts, accountAttempts]) {
+    for (const [key, data] of map) {
+      if (data.lockedUntil && now > data.lockedUntil) {
+        map.delete(key);
+      }
     }
   }
 }, 10 * 60 * 1000);
@@ -44,37 +56,45 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
+    // Per-account lockout (in addition to per-IP above).
+    const acctKey = String(username).toLowerCase();
+    const acctEntry = accountAttempts.get(acctKey);
+    if (acctEntry && acctEntry.lockedUntil && Date.now() < acctEntry.lockedUntil) {
+      const minutesLeft = Math.ceil((acctEntry.lockedUntil - Date.now()) / 60000);
+      return res.status(429).json({ error: `Too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`, locked: true });
+    }
+
     const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]);
-    if (rows.length === 0) {
+    const user = rows[0] || null;
+
+    // Always run a bcrypt comparison (against a dummy hash when the user or
+    // password is absent) so response timing doesn't reveal whether the
+    // account exists or uses Discord-only login.
+    const hashToCheck = (user && user.password_hash) ? user.password_hash : DUMMY_BCRYPT_HASH;
+    const passwordMatches = await bcrypt.compare(password, hashToCheck);
+    const passwordOk = !!(user && user.password_hash) && passwordMatches;
+
+    if (!passwordOk) {
+      // Generic response for ALL pre-auth failures (no user / no password set /
+      // wrong password). Does not leak account existence or state.
       recordFailedAttempt(ip, username);
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const user = rows[0];
-
+    // Password verified — only now is it safe to disclose account state.
     if (user.status === 'banned') {
       return res.status(403).json({ error: 'Your account has been banned. If you believe this is a mistake, please contact an officer.', status: 'banned' });
     }
-
     if (user.status !== 'active') {
       return res.status(403).json({ error: 'Account is not active', status: user.status });
     }
 
-    if (!user.password_hash) {
-      return res.status(401).json({ error: 'Password login is not set up for this account. Use Discord to log in.' });
-    }
-
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) {
-      recordFailedAttempt(ip, username);
-      return res.status(401).json({ error: 'Invalid username or password' });
-    }
-
-    // Success — clear failed attempts
+    // Success — clear failed attempts (both buckets)
     loginAttempts.delete(ip);
+    accountAttempts.delete(acctKey);
 
     const permissions = await loadUserPermissions(user.id);
-    const token = signToken({ id: user.id, username: user.username, rank: user.rank }, permissions);
+    const token = signToken({ id: user.id, username: user.username, rank: user.rank, token_version: user.token_version }, permissions);
 
     res.json({
       token,
@@ -98,6 +118,15 @@ router.post('/login', async (req, res) => {
 });
 
 function recordFailedAttempt(ip, username) {
+  // Per-account counter (defeats IP-rotation against a single account).
+  if (username) {
+    const acctKey = String(username).toLowerCase();
+    const acct = accountAttempts.get(acctKey) || { count: 0 };
+    acct.count += 1;
+    if (acct.count >= MAX_ATTEMPTS) acct.lockedUntil = Date.now() + LOCKOUT_MS;
+    accountAttempts.set(acctKey, acct);
+  }
+
   const entry = loginAttempts.get(ip) || { count: 0 };
   entry.count += 1;
 
@@ -172,6 +201,19 @@ router.post('/logout', requireAuth, (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
+// POST /api/auth/logout-all — revoke every outstanding token for the caller
+// (including long-lived companion/toolkit tokens) by bumping token_version.
+// Use after a device is lost or a token may have leaked.
+router.post('/logout-all', requireAuth, async (req, res) => {
+  try {
+    await pool.execute('UPDATE users SET token_version = token_version + 1 WHERE id = ?', [req.user.id]);
+    res.json({ message: 'All sessions revoked. Other devices must sign in again.' });
+  } catch (err) {
+    console.error('logout-all error:', err);
+    res.status(500).json({ error: 'Failed to revoke sessions' });
+  }
+});
+
 // ── Officer Toolkit token issuance ──
 // The MDGA Officer Toolkit (Tauri desktop app) authenticates by having
 // the officer sign into the website in their browser, click "Generate
@@ -189,14 +231,27 @@ function gcToolkitCodes() {
   }
 }
 function genToolkitCode() {
-  // 8 char [A-Z2-9] excluding O/0/I/1 for visual clarity
+  // 8 char [A-Z2-9] excluding O/0/I/1 for visual clarity. Uses a CSPRNG
+  // (crypto.randomInt) — this code gates a privileged 7-day JWT, so it must
+  // not come from the non-cryptographic Math.random PRNG.
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let out = '';
   for (let i = 0; i < 8; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    out += alphabet[crypto.randomInt(alphabet.length)];
   }
   return out;
 }
+
+// Dedicated tight throttle for the PUBLIC code-exchange endpoint, on top of
+// the global limiter — a code maps to a privileged JWT, so brute-force of the
+// 8-char keyspace must be expensive. Keyed per-IP.
+const toolkitExchangeLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many code attempts. Try again shortly.' },
+});
 
 // POST /api/auth/toolkit-token-issue
 // Officer must be signed in (requireAuth) and have officer/guildmaster
@@ -219,10 +274,11 @@ router.post('/toolkit-token-issue', requireAuth, async (req, res) => {
         username: req.user.username,
         rank: req.user.rank,
         permissions,
+        tv: req.user.token_version || 0,
         purpose: 'toolkit',
       },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS256' }
     );
     // Generate a unique code (retry on collision; ~10^12 keyspace so very rare).
     let code;
@@ -251,7 +307,7 @@ router.post('/toolkit-token-issue', requireAuth, async (req, res) => {
 // Public — the toolkit POSTs the 8-char code it received from the
 // officer and receives the underlying 7-day JWT. One-time use; the
 // code is deleted on successful exchange.
-router.post('/toolkit-token-exchange', async (req, res) => {
+router.post('/toolkit-token-exchange', toolkitExchangeLimiter, async (req, res) => {
   try {
     gcToolkitCodes();
     const codeRaw = String(req.body?.code || '').trim().toUpperCase();
@@ -260,6 +316,8 @@ router.post('/toolkit-token-exchange', async (req, res) => {
     }
     const entry = toolkitCodes.get(codeRaw);
     if (!entry || entry.expiresAt <= Date.now()) {
+      // Count miss toward the IP-ban tally so sustained guessing is blocked.
+      recordFailure(req.ip || req.connection.remoteAddress);
       return res.status(404).json({ error: 'Code not found or expired' });
     }
     toolkitCodes.delete(codeRaw);
@@ -287,7 +345,7 @@ router.post('/toolkit-token-refresh', requireAuth, async (req, res) => {
     const jwt = require('jsonwebtoken');
     const authHeader = req.headers.authorization || '';
     const tok = authHeader.split(' ')[1];
-    const decoded = jwt.verify(tok, process.env.JWT_SECRET);
+    const decoded = jwt.verify(tok, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     if (decoded.purpose !== 'toolkit') {
       return res.status(403).json({ error: 'Not a toolkit token' });
     }
@@ -299,10 +357,11 @@ router.post('/toolkit-token-refresh', requireAuth, async (req, res) => {
         username: req.user.username,
         rank: req.user.rank,
         permissions,
+        tv: req.user.token_version || 0,
         purpose: 'toolkit',
       },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS256' }
     );
     res.json({ token, expiresInDays: 7, issuedAt: new Date().toISOString() });
   } catch (err) {
@@ -331,10 +390,11 @@ router.post('/companion-token', requireAuth, async (req, res) => {
         username: req.user.username,
         rank: req.user.rank,
         permissions,
+        tv: req.user.token_version || 0,
         purpose: 'companion',
       },
       process.env.JWT_SECRET,
-      { expiresIn: '90d' }
+      { expiresIn: '90d', algorithm: 'HS256' }
     );
     res.json({
       token,

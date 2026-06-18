@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const pool = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { sendApprovalEmail } = require('../services/email');
@@ -6,6 +7,17 @@ const { sendApplicationAlert, sendApplicationApprovedDM } = require('../bot');
 const { fetchCharacterProfile, scrapeArmoryProfile } = require('../blizzard');
 
 const router = express.Router();
+
+// Tight limiter for the PUBLIC application submission. Each submit triggers
+// several outbound Blizzard API + armory-scrape calls and a Discord alert, so
+// it's an amplification target — cap it well below the global anon bucket.
+const applyLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many applications from this network. Please try again later.' },
+});
 
 // Slugify a realm name the way Blizzard does: lowercase, spaces+apostrophes
 // → hyphens, drop anything else (forum #79 armory validation).
@@ -16,12 +28,26 @@ function slugifyRealm(name) {
 }
 
 // POST /api/applications
-router.post('/', async (req, res) => {
+router.post('/', applyLimiter, async (req, res) => {
   try {
     const { characterName, server, classSpec, discord, experience, whyJoin } = req.body;
 
     if (!characterName || !server || !classSpec || !discord) {
       return res.status(400).json({ error: 'Required fields: characterName, server, classSpec, discord' });
+    }
+
+    // De-dupe: if an identical character+server application already came in
+    // recently, short-circuit BEFORE the expensive armory lookups + Discord
+    // alert. Stops a single character being used to flood the table / officer
+    // channel and to amplify outbound Blizzard calls.
+    const [[dupe]] = await pool.execute(
+      `SELECT id FROM applications
+       WHERE character_name = ? AND server = ? AND submitted_at > (NOW() - INTERVAL 1 HOUR)
+       ORDER BY id DESC LIMIT 1`,
+      [String(characterName).trim(), String(server).trim()]
+    );
+    if (dupe) {
+      return res.status(429).json({ error: 'An application for this character was just submitted. Please wait before retrying.' });
     }
 
     // Armory validation (forum #79). Verify the character actually exists

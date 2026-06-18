@@ -1,5 +1,10 @@
 const fetch = require('node-fetch');
 
+// Hard timeout on every outbound Blizzard/armory call (node-fetch v2 honors
+// `timeout`). Without it a hung upstream pins the request handler indefinitely,
+// which an attacker can use to exhaust the event loop via the public apply form.
+const BLIZZ_TIMEOUT_MS = 8000;
+
 let cachedToken = null;
 let tokenExpiresAt = 0;
 
@@ -20,6 +25,7 @@ async function getAccessToken() {
       client_id: clientId,
       client_secret: clientSecret,
     }),
+    timeout: BLIZZ_TIMEOUT_MS,
   });
 
   if (!res.ok) throw new Error(`Blizzard token request failed: ${res.status}`);
@@ -32,7 +38,7 @@ async function getAccessToken() {
 // Helper: fetch from Blizzard API with Bearer auth header
 async function blizzFetch(url) {
   const token = await getAccessToken();
-  return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  return fetch(url, { headers: { Authorization: `Bearer ${token}` }, timeout: BLIZZ_TIMEOUT_MS });
 }
 
 // Brace-match an object literal embedded in JS source.
@@ -72,6 +78,7 @@ async function scrapeArmoryProfile(realmSlug, characterName) {
     const url = `https://worldofwarcraft.blizzard.com/en-us/character/us/${realmSlug}/${encodeURIComponent(characterName)}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: BLIZZ_TIMEOUT_MS,
     });
     if (!res.ok) return null;
     const html = await res.text();
@@ -139,6 +146,7 @@ async function scrapeAchievementCategories(realmSlug, characterName) {
     const url = `https://worldofwarcraft.blizzard.com/en-us/character/us/${realmSlug}/${encodeURIComponent(characterName)}/achievements`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      timeout: BLIZZ_TIMEOUT_MS,
     });
     if (!res.ok) return null;
     const html = await res.text();
@@ -203,6 +211,7 @@ async function scrapeBlizzardRenderUrl(characterName, realmSlug) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
+      timeout: BLIZZ_TIMEOUT_MS,
     });
     if (!res.ok) return null;
     const html = await res.text();

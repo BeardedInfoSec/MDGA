@@ -56,7 +56,7 @@ export default function ForumIndex() {
   }, [isLoggedIn, apiFetch]);
 
   const doSearch = useCallback(async () => {
-    if (searchQuery.length < 2) { setSearchResults(null); return; }
+    if (searchQuery.length < 3) { setSearchResults(null); return; }
     try {
       const res = isLoggedIn
         ? await apiFetch(`/forum/search?q=${encodeURIComponent(searchQuery)}`)
@@ -70,7 +70,7 @@ export default function ForumIndex() {
   }, [searchQuery, isLoggedIn, apiFetch]);
 
   const doSuggest = useCallback(async (q) => {
-    if (q.length < 2) { setSuggestions(null); return; }
+    if (q.length < 3) { setSuggestions(null); return; }
     try {
       const res = isLoggedIn
         ? await apiFetch(`/forum/search?q=${encodeURIComponent(q)}`)

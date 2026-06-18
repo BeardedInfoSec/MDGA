@@ -40,6 +40,18 @@ router.get('/:id', requireAuth, async (req, res) => {
     );
     if (users.length === 0) return res.status(404).json({ error: 'User not found' });
 
+    // PII gate: a member's Discord handle and AFK reason are only shown to the
+    // profile owner and to officers — not to every authenticated member who can
+    // enumerate /api/profile/:id. (Display name / characters remain public.)
+    const viewer = req.user || {};
+    const isSelf = String(viewer.id) === String(req.params.id);
+    const isOfficer = ['officer', 'guildmaster'].includes(viewer.rank)
+      || (viewer.permissions && viewer.permissions.includes('admin.view_panel'));
+    if (!isSelf && !isOfficer) {
+      users[0].discord_username = null;
+      users[0].afk_reason = null;
+    }
+
     const [characters] = await pool.execute(
       `SELECT uc.*, ps.arena_2v2, ps.arena_3v3, ps.solo_shuffle, ps.rbg_rating, ps.blitz_rating, ps.honorable_kills,
              ps.killing_blows, ps.arenas_played, ps.arenas_won, ps.arenas_lost,
