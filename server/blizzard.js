@@ -294,7 +294,16 @@ async function fetchCharacterProfile(realmSlug, characterName) {
     blizzFetch(`${base}/character-media?${ns}`),
   ]);
 
-  if (!profileRes.ok) return null;
+  // CRITICAL: distinguish "this character genuinely does not exist" (404)
+  // from a transient upstream failure (429 rate-limit, 5xx outage). Callers —
+  // notably the character scheduler — DELETE user data when this returns null,
+  // so collapsing every non-200 into null destroyed real characters whenever
+  // Blizzard hiccuped. Only a 404 means "not found"; anything else throws so
+  // the caller treats it as a retryable error.
+  if (profileRes.status === 404) return null;
+  if (!profileRes.ok) {
+    throw new Error(`Blizzard profile API returned ${profileRes.status} for ${characterName}-${realmSlug}`);
+  }
 
   const profile = await profileRes.json();
 
