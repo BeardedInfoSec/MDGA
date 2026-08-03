@@ -20,6 +20,13 @@ tools/
 # Member audit data (PII / Discord IDs) — operational, not source.
 MDGA_Audit_Log.xlsx
 
+# Reconciliation exports carry the same member PII and land in the repo root
+# with a timestamped name, so match the pattern rather than one filename.
+mdga-reconciliation-*.xlsx
+
+# Roster/recruitment spreadsheets pulled down from Drive — operational data.
+google_docs/
+
 # Local worktree state
 .claude/
 
