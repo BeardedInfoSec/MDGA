@@ -7,7 +7,6 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const pool = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { sendOfficerAlert } = require('../bot');
 const { processRankChanges } = require('../services/guild-sync');
 const guildRegistry = require('../services/guild-registry');
 
@@ -250,20 +249,12 @@ router.post('/sync', requireAuth, addonLimiter, async (req, res) => {
         });
       }
 
-      // Fire-and-forget: process rank changes async
+      // Fire-and-forget: process rank changes async. processRankChanges only
+      // posts an officer alert when something actually changes (Discord role or
+      // site rank), so we don't duplicate the notification here.
       processRankChanges(guildId, enrichedChanges).catch((err) => {
         console.error('[Addon sync] processRankChanges error:', err.message);
       });
-
-      // Officer alerts for rank changes
-      for (const change of rankChanges) {
-        sendOfficerAlert(
-          'Addon: In-Game Rank Change',
-          `**${change.characterName}** rank: **${change.oldRank}** \u2192 **${change.newRank}**\n` +
-          `Reported by: ${playerInfo.name} via addon`,
-          0x00CCFF
-        );
-      }
     }
 
     // ── 12. Trim old addon events (keep last 10,000 per guild) ──

@@ -7,6 +7,9 @@ module.exports = {
       // (Node 12 on this host), which cannot parse modern syntax (e.g. optional chaining).
       // Override via PM2_INTERPRETER env var if the nvm path changes.
       interpreter: process.env.PM2_INTERPRETER || '/home/mdga/.nvm/versions/node/v24.12.0/bin/node',
+      // Fork mode honors the interpreter above. Cluster mode would use PM2's
+      // own Node (system Node 12 on this host) and crash on modern syntax.
+      exec_mode: 'fork',
       instances: 1,
       autorestart: true,
       watch: false,
