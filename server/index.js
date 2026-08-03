@@ -155,6 +155,58 @@ app.use('/api/config', require('./routes/config'));
 app.use('/api/reconciliation', require('./routes/reconciliation'));
 app.use('/api/admin', require('./routes/admin'));
 
+// The routes the React router actually serves. Kept here so the SPA catch-all
+// can tell a real page from a typo and answer with a real status code.
+// Auth-gated routes are included: they exist, they just redirect to /login.
+const SPA_ROUTES = new Set([
+  '/', '/login', '/admin-login', '/join', '/story', '/leadership',
+  '/events', '/leaderboards', '/forum', '/profile', '/admin',
+  '/overlord', '/wow-addon',
+]);
+const SPA_PREFIXES = ['/forum/', '/officer-toolkit/'];
+
+function isKnownRoute(reqPath) {
+  const clean = reqPath.length > 1 && reqPath.endsWith('/') ? reqPath.slice(0, -1) : reqPath;
+  return SPA_ROUTES.has(clean) || SPA_PREFIXES.some((prefix) => reqPath.startsWith(prefix));
+}
+
+// robots.txt / sitemap.xml. Served from Express rather than the client bundle
+// so they don't depend on a front-end rebuild to change. Both previously fell
+// through to the SPA catch-all and answered 200 with index.html, so crawlers
+// got a page of React markup where they asked for a sitemap.
+//
+// Only genuinely public pages are listed. /overlord is a deliberately
+// unlisted direct-link archive, so it is omitted rather than Disallow'd —
+// a Disallow line would publish the path to anyone reading robots.txt.
+const PUBLIC_PAGES = ['/', '/join', '/story', '/leadership', '/events', '/leaderboards'];
+
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send([
+    'User-agent: *',
+    'Disallow: /api/',
+    'Disallow: /admin',
+    'Disallow: /admin-login',
+    'Disallow: /profile',
+    'Disallow: /forum',
+    'Disallow: /uploads/',
+    '',
+    'Sitemap: https://mdga.gg/sitemap.xml',
+    '',
+  ].join('\n'));
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const urls = PUBLIC_PAGES
+    .map((page) => `  <url><loc>https://mdga.gg${page}</loc></url>`)
+    .join('\n');
+  res.type('application/xml').send(
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    `${urls}\n` +
+    '</urlset>\n'
+  );
+});
+
 // React SPA: serve client/dist if the build exists.
 const REACT_DIST = path.join(APP_ROOT, 'client', 'dist');
 const fs = require('fs');
@@ -227,12 +279,16 @@ if (serveReact) {
     },
   }));
 
-  // SPA catch-all: all non-API routes serve React's index.html
+  // SPA catch-all: all non-API routes serve React's index.html. Unknown paths
+  // still get the app (the client router sends them home), but with a 404
+  // status so crawlers aren't told every typo is a real page.
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
       return res.status(404).json({ error: 'Not found' });
     }
-    res.sendFile(path.join(REACT_DIST, 'index.html'));
+    res
+      .status(isKnownRoute(req.path) ? 200 : 404)
+      .sendFile(path.join(REACT_DIST, 'index.html'));
   });
 } else {
   // No React build found — refuse to serve project root (would expose .env and other secrets)
