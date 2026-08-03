@@ -66,73 +66,113 @@ async function syncGuild(guild) {
     }
   }
   if (acceptRoster) {
-    const rankChanges = [];
-
-    // Snapshot existing character names BEFORE the upsert so we can diff
-    // joined / left after the round-trip (forum #31). Keep realm so the
-    // event row remembers which armory each character belongs to.
-    const [priorRows] = await pool.execute(
-      'SELECT character_name, realm_slug FROM guild_members WHERE guild_id = ?',
-      [guild.id]
+    // Join/leave and rank diffing is done BY THE DATABASE, never by comparing
+    // names in JS. character_name is utf8mb4_unicode_ci, so MySQL considers
+    // names that differ only by accent or case to be the same row
+    // (Flaspër == Flaspèr), while JS string equality does not. The old code
+    // snapshotted names into a JS Map and diffed them with ===, so for any
+    // character whose stored spelling differed from the roster spelling the
+    // diff never matched and re-emitted the SAME event on every 3-hour sync
+    // — 25,845 of 42,076 rows in guild_membership_events were phantoms from
+    // 70 characters (Warchiêf-tichondrius logged "joined" 2,844 times).
+    //
+    // Instead we let the upsert itself report what happened: affectedRows === 1
+    // means MySQL actually inserted a new row (a real join, decided with the
+    // same collation that owns the unique key), and anything left un-stamped
+    // by this pass has left the roster.
+    //
+    // Read the mark as a preformatted string rather than a Date: it then goes
+    // back to MySQL verbatim, with no JS Date (de)serialization sitting between
+    // the value that stamps the rows and the value that selects them.
+    const [[{ sync_mark }]] = await pool.query(
+      "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS sync_mark"
     );
-    const priorByName = new Map(priorRows.map((r) => [r.character_name, r.realm_slug]));
-    const currentNames = new Set(roster.map((m) => m.character_name));
 
+    const joinedEvents = [];
     for (const member of roster) {
-      // Check for rank change before upsert
-      const [existing] = await pool.execute(
-        'SELECT id, guild_rank, linked_user_id FROM guild_members WHERE guild_id = ? AND character_name = ?',
-        [guild.id, member.character_name]
-      );
-
-      const previousRank = existing.length > 0 ? existing[0].guild_rank : null;
-      const newRank = member.rank;
-
-      await pool.execute(
+      // previous_guild_rank is maintained entirely DB-side: NULL on insert,
+      // and set to the row's pre-sync rank on update. That keeps the rank
+      // diff on the same collation as the unique key, and drops the old
+      // per-member SELECT (~1,000 extra queries per guild per sync).
+      const [result] = await pool.execute(
         `INSERT INTO guild_members
           (guild_id, character_name, realm_slug, realm_name, level, class, race, guild_rank, previous_guild_rank, last_synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW())
         ON DUPLICATE KEY UPDATE
           realm_name = VALUES(realm_name), level = VALUES(level),
           class = VALUES(class), race = VALUES(race),
           previous_guild_rank = guild_rank, guild_rank = VALUES(guild_rank), last_synced_at = NOW()`,
         [guild.id, member.character_name, member.realm_slug, member.realm_name,
-         member.level, member.class, member.race, newRank, previousRank]
+         member.level, member.class, member.race, member.rank]
       );
-
-      // Track rank changes for Discord role sync
-      if (previousRank !== null && previousRank !== newRank) {
-        rankChanges.push({
-          characterName: member.character_name,
-          realmSlug: member.realm_slug,
-          oldRank: previousRank,
-          newRank,
-          linkedUserId: existing[0]?.linked_user_id,
-        });
+      // 1 = inserted, 2 = updated. Only a genuine insert is a join.
+      if (result.affectedRows === 1) {
+        joinedEvents.push([guild.id, member.character_name, member.realm_slug, 'joined']);
       }
     }
 
-    // Remove members no longer in the roster
-    const placeholders = roster.map(() => '?').join(',');
-    const rosterNames = roster.map(m => m.character_name);
-    await pool.execute(
-      `DELETE FROM guild_members WHERE guild_id = ? AND character_name NOT IN (${placeholders})`,
-      [guild.id, ...rosterNames]
+    // Anything this pass did not stamp is no longer in the roster. Selecting
+    // the departures by timestamp rather than by `character_name NOT IN (...)`
+    // also fixes the realm-blind delete: the old NOT IN matched on name only,
+    // so a character who left was kept on file whenever any same-named
+    // character on another realm was still present (49 such name groups).
+    //
+    // The whole departure path hangs on every row we just upserted carrying a
+    // last_synced_at >= sync_mark. Verify that before deleting anything: if
+    // the stamp didn't take (clock skew, a mark that failed to round-trip),
+    // every member would look departed and the delete would empty the roster.
+    const [[{ stamped }]] = await pool.execute(
+      'SELECT COUNT(*) AS stamped FROM guild_members WHERE guild_id = ? AND last_synced_at >= ?',
+      [guild.id, sync_mark]
     );
-
-    // Diff prior vs. current to emit join/leave events (forum #31). We do
-    // this after the upsert+delete so any catastrophic-drop guard above
-    // applies — we don't want to log 800 fake "left" events if a bad API
-    // response wiped the roster.
-    const joinedEvents = roster
-      .filter((m) => !priorByName.has(m.character_name))
-      .map((m) => [guild.id, m.character_name, m.realm_slug, 'joined']);
-    const leftEvents = [];
-    for (const [name, realm] of priorByName.entries()) {
-      if (!currentNames.has(name)) {
-        leftEvents.push([guild.id, name, realm, 'left']);
-      }
+    // Deliberately a floor, not an equality: two roster entries whose names
+    // differ only by accent collapse onto one row under utf8mb4_unicode_ci, so
+    // `stamped` is legitimately a little below roster.length. What we're
+    // ruling out is the stamp not taking at all, which leaves it at ~0.
+    const stampIsSound = stamped > 0 && stamped >= Math.ceil(roster.length / 2);
+    if (!stampIsSound) {
+      console.error(
+        `[Guild sync] ${guild.name_slug}: only ${stamped} of ${roster.length} synced rows carry this pass's timestamp — skipping the departure sweep rather than risk emptying the roster.`
+      );
     }
+
+    const [goneRows] = stampIsSound
+      ? await pool.execute(
+          `SELECT character_name, realm_slug FROM guild_members
+            WHERE guild_id = ? AND (last_synced_at IS NULL OR last_synced_at < ?)`,
+          [guild.id, sync_mark]
+        )
+      : [[]];
+    const leftEvents = goneRows.map((r) => [guild.id, r.character_name, r.realm_slug, 'left']);
+
+    // Rank changes, read back from the rows this pass just stamped.
+    const [rankRows] = await pool.execute(
+      `SELECT character_name, realm_slug, previous_guild_rank, guild_rank, linked_user_id
+         FROM guild_members
+        WHERE guild_id = ? AND last_synced_at >= ?
+          AND previous_guild_rank IS NOT NULL
+          AND previous_guild_rank <> guild_rank`,
+      [guild.id, sync_mark]
+    );
+    const rankChanges = rankRows.map((r) => ({
+      characterName: r.character_name,
+      realmSlug: r.realm_slug,
+      oldRank: r.previous_guild_rank,
+      newRank: r.guild_rank,
+      linkedUserId: r.linked_user_id,
+    }));
+
+    if (stampIsSound) {
+      await pool.execute(
+        `DELETE FROM guild_members
+          WHERE guild_id = ? AND (last_synced_at IS NULL OR last_synced_at < ?)`,
+        [guild.id, sync_mark]
+      );
+    }
+
+    // Emit join/leave events (forum #31). Done after the upsert+delete so the
+    // catastrophic-drop guard above applies — we don't want to log 800 fake
+    // "left" events if a bad API response wiped the roster.
     const allEvents = [...joinedEvents, ...leftEvents];
     if (allEvents.length > 0) {
       const valuesSql = allEvents.map(() => '(?, ?, ?, ?)').join(', ');
@@ -275,10 +315,14 @@ async function processRankChanges(guildId, changes) {
       // Find the linked user (may have been just cross-linked)
       let userId = change.linkedUserId;
       if (!userId) {
+        // Realm-qualified: without it a same-named character on another realm
+        // could hand back the wrong account, and this userId drives Discord
+        // role assignment below.
         const [link] = await pool.execute(
           `SELECT gm.linked_user_id FROM guild_members gm
-           WHERE gm.guild_id = ? AND gm.character_name = ? AND gm.linked_user_id IS NOT NULL`,
-          [guildId, change.characterName]
+           WHERE gm.guild_id = ? AND gm.character_name = ? AND gm.realm_slug = ?
+             AND gm.linked_user_id IS NOT NULL`,
+          [guildId, change.characterName, change.realmSlug]
         );
         if (link.length > 0) userId = link[0].linked_user_id;
       }
