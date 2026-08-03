@@ -158,8 +158,12 @@ app.use('/api/admin', require('./routes/admin'));
 // The routes the React router actually serves. Kept here so the SPA catch-all
 // can tell a real page from a typo and answer with a real status code.
 // Auth-gated routes are included: they exist, they just redirect to /login.
+// '/index.php' is the home page, not a stray path: Apache's DirectoryIndex
+// resolves the site root before the proxy rule forwards it, so a request to
+// https://mdga.gg/ reaches Express as '/index.php'. Verified on prod — leaving
+// it out made the home page answer 404 while every other route was fine.
 const SPA_ROUTES = new Set([
-  '/', '/login', '/admin-login', '/join', '/story', '/leadership',
+  '/', '/index.php', '/login', '/admin-login', '/join', '/story', '/leadership',
   '/events', '/leaderboards', '/forum', '/profile', '/admin',
   '/overlord', '/wow-addon',
 ]);
